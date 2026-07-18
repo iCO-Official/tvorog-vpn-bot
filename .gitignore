@@ -15,8 +15,8 @@ build/
 *.sqlite
 *.sqlite3
 
-# Config
-config.py
+# Config example
+config.py.example
 
 # WireGuard configs
 configs/
