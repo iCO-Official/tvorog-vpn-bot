@@ -1,8 +1,0 @@
-blank_issues_enabled: false
-contact_links:
-  - name: Документация
-    url: https://github.com/your-repo/vpn-bot/blob/main/README.md
-    about: Прочитайте документацию перед созданием issue
-  - name: FAQ
-    url: https://github.com/your-repo/vpn-bot/blob/main/FAQ.md
-    about: Проверьте часто задаваемые вопросы
