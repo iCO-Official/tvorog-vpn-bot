@@ -82,7 +82,7 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text = f"🆓 {tariff['name']} — бесплатно"
         else:
             emoji = {"week": "⏰", "month": "📅", "quarter": "📆", "year": "🎯"}.get(key, "💳")
-            text = f"{emoji} {tariff['name']} — {tariff['price']} Stars"
+            text = f"{emoji} {tariff['name']} — {tariff['price']} ₽"
         keyboard.append([InlineKeyboardButton(text, callback_data=f"buy_{key}")])
 
     keyboard.append([InlineKeyboardButton("🔙 Назад в меню", callback_data="back_to_menu")])

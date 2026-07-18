@@ -9,7 +9,7 @@ BOT_NAME = "Творог VPN"
 BOT_USERNAME = "tvorog_vpn_bot"
 
 # Telegram Bot Token
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8782090577:AAEFp08ZPvh9QDDeESi6EsmljEs2Bh2Qqq8")
 
 # ID администратора
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))
