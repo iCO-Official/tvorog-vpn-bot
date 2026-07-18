@@ -1,0 +1,17 @@
+name: Bundlephobia
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  bundlephobia:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Bundlephobia
+      uses: sidharthv96/bundlephobia-action@v2
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}

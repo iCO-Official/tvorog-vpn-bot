@@ -1,0 +1,17 @@
+* @your-username
+
+# Bot code
+bot.py @your-username
+database.py @your-username
+vpn_manager.py @your-username
+payments.py @your-username
+config.py @your-username
+
+# Documentation
+*.md @your-username
+docs/ @your-username
+
+# CI/CD
+.github/ @your-username
+Dockerfile @your-username
+docker-compose.yml @your-username

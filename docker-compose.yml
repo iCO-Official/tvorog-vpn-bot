@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  tvorog-vpn-bot:
+    build: .
+    container_name: tvorog-vpn-bot
+    restart: unless-stopped
+    volumes:
+      - ./config.py:/app/config.py
+      - ./tvorog_vpn.db:/app/tvorog_vpn.db
+      - ./configs:/app/configs
+    environment:
+      - TZ=Europe/Moscow
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+
+  wireguard:
+    image: linuxserver/wireguard
+    container_name: wireguard
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Moscow
+      - SERVERURL=your_server_ip
+      - SERVERPORT=51820
+      - PEERS=100
+    volumes:
+      - ./wireguard-config:/config
+    ports:
+      - 51820:51820/udp
