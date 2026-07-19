@@ -1,4 +1,6 @@
 import logging
+import sqlite3
+from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import (
     Application,
@@ -13,7 +15,7 @@ from telegram.ext import (
 from config import (
     BOT_TOKEN, TARIFFS, SERVERS, ADMIN_ID, BOT_NAME,
     WELCOME_TEXT, HELP_TEXT, TARIFF_TEXT, SUCCESS_PAYMENT_TEXT,
-    CONFIG_INSTRUCTION_TEXT
+    CONFIG_INSTRUCTION_TEXT, DATABASE_PATH
 )
 from database import (
     init_db, get_user, create_user,
@@ -536,25 +538,65 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # Команда /admin
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Админ-панель"""
+    """Админ-панель с расширенной статистикой"""
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("❌ Нет доступа")
         return
 
     stats = get_user_stats()
-    await update.message.reply_text(
-        f"📊 <b>Админ-панель {BOT_NAME}</b>\n\n"
-        f"👥 Пользователей: {stats['total_users']}\n"
-        f"✅ Активных: {stats['active_users']}\n"
-        f"💰 Доход: {stats['total_revenue']} ₽\n\n"
-        f"🧀 <b>Творог:</b>\n"
-        f"/cheese_orders — Pending заказы\n"
-        f"/order_cheese ID — Заказать на Ozon\n"
-        f"/set_cheese ID STATUS — Изменить статус\n\n"
-        f"👤 <b>Пользователи:</b>\n"
-        f"/add_user ID DAYS — Добавить подписку",
-        parse_mode='HTML'
-    )
+
+    # Форматируем статистику по тарифам
+    tariffs_text = ""
+    for tariff, data in stats.get("tariffs_stats", {}).items():
+        tariffs_text += f"  • {tariff}: {data['count']} продаж ({data['revenue']} ₽)\n"
+
+    admin_text = f"""
+📊 <b>Админ-панель {BOT_NAME}</b>
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+👥 <b>Пользователи:</b>
+  • Всего: {stats['total_users']}
+  • Активных: {stats['active_users']}
+  • Новых сегодня: {stats['new_today']}
+  • Новых за неделю: {stats['new_week']}
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+💰 <b>Доход:</b>
+  • Сегодня: {stats['today_revenue']} ₽
+  • За неделю: {stats['week_revenue']} ₽
+  • За месяц: {stats['month_revenue']} ₽
+  • Всего: {stats['total_revenue']} ₽
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+📦 <b>Продажи по тарифам:</b>
+{tariffs_text if tariffs_text else "  Нет продаж"}
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+🧪 <b>Пробные периоды:</b>
+  • Взяли: {stats['trial_users']}
+  • Купили потом: {stats['paid_users']}
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+🧀 <b>Творог:</b>
+  • Заказов: {stats['cheese_orders']}
+  • Ожидают: {stats['cheese_pending']}
+  • Доставлено: {stats['cheese_delivered']}
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+📝 <b>Команды:</b>
+/add_user ID DAYS — Добавить подписку
+/cheese_orders — Заказы творога
+/order_cheese ID — Заказать на Ozon
+/set_cheese ID STATUS — Статус творога
+/users — Список пользователей
+"""
+    await update.message.reply_text(admin_text, parse_mode='HTML')
 
 # Команда /add_user
 async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -568,6 +610,35 @@ async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Подписка на {days} дней добавлена ({user_id})")
     except (IndexError, ValueError):
         await update.message.reply_text("Использование: /add_user USER_ID DAYS")
+
+# Команда /users — список пользователей
+async def users_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Список активных пользователей"""
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT user_id, username, expires_at FROM users WHERE is_active = 1 AND expires_at > ? ORDER BY expires_at DESC LIMIT 20",
+        (datetime.now().isoformat(),)
+    )
+    users = cursor.fetchall()
+    conn.close()
+
+    if not users:
+        await update.message.reply_text("📋 Нет активных пользователей")
+        return
+
+    text = "📋 <b>Активные пользователи (последние 20):</b>\n\n"
+    for user_id, username, expires_at in users:
+        expires = datetime.fromisoformat(expires_at)
+        days_left = (expires - datetime.now()).days
+        text += f"👤 @{username or 'нет'} (ID: {user_id})\n"
+        text += f"   ⏰ До: {expires.strftime('%d.%m.%Y')} ({days_left} дн.)\n\n"
+
+    await update.message.reply_text(text, parse_mode='HTML')
 
 # Команда /cheese_orders
 async def cheese_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -645,6 +716,7 @@ def main():
     application.add_handler(CommandHandler("cheese_orders", cheese_orders))
     application.add_handler(CommandHandler("set_cheese", set_cheese))
     application.add_handler(CommandHandler("order_cheese", order_cheese))
+    application.add_handler(CommandHandler("users", users_list))
 
     # Кнопки
     application.add_handler(CallbackQueryHandler(button_callback))

@@ -141,25 +141,87 @@ def add_payment(user_id: int, amount: int, tariff: str, payment_id: str):
     conn.close()
 
 def get_user_stats() -> dict:
-    """Получить статистику пользователей"""
+    """Получить расширенную статистику"""
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
+    now = datetime.now()
 
+    # Всего пользователей
     cursor.execute("SELECT COUNT(*) FROM users")
     total_users = cursor.fetchone()[0]
 
-    cursor.execute("SELECT COUNT(*) FROM users WHERE is_active = 1 AND expires_at > ?", (datetime.now().isoformat(),))
+    # Активные подписки
+    cursor.execute("SELECT COUNT(*) FROM users WHERE is_active = 1 AND expires_at > ?", (now.isoformat(),))
     active_users = cursor.fetchone()[0]
 
-    cursor.execute("SELECT SUM(amount) FROM payments")
+    # Пробный период (цена = 0)
+    cursor.execute("SELECT COUNT(DISTINCT user_id) FROM payments WHERE tariff = 'trial'")
+    trial_users = cursor.fetchone()[0]
+
+    # Оплатившие (цена > 0)
+    cursor.execute("SELECT COUNT(DISTINCT user_id) FROM payments WHERE tariff != 'trial' AND amount > 0")
+    paid_users = cursor.fetchone()[0]
+
+    # Доход
+    cursor.execute("SELECT SUM(amount) FROM payments WHERE amount > 0")
     total_revenue = cursor.fetchone()[0] or 0
+
+    # Доход за сегодня
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    cursor.execute("SELECT SUM(amount) FROM payments WHERE amount > 0 AND created_at >= ?", (today_start.isoformat(),))
+    today_revenue = cursor.fetchone()[0] or 0
+
+    # Доход за неделю
+    week_start = now - timedelta(days=7)
+    cursor.execute("SELECT SUM(amount) FROM payments WHERE amount > 0 AND created_at >= ?", (week_start.isoformat(),))
+    week_revenue = cursor.fetchone()[0] or 0
+
+    # Доход за месяц
+    month_start = now - timedelta(days=30)
+    cursor.execute("SELECT SUM(amount) FROM payments WHERE amount > 0 AND created_at >= ?", (month_start.isoformat(),))
+    month_revenue = cursor.fetchone()[0] or 0
+
+    # Оплаты по тарифам
+    cursor.execute("SELECT tariff, COUNT(*), SUM(amount) FROM payments WHERE amount > 0 GROUP BY tariff")
+    tariffs_stats = {}
+    for row in cursor.fetchall():
+        tariffs_stats[row[0]] = {"count": row[1], "revenue": row[2] or 0}
+
+    # Заказы творога
+    cursor.execute("SELECT COUNT(*) FROM users WHERE cheese_order_status != 'none'")
+    cheese_orders = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM users WHERE cheese_order_status = 'pending'")
+    cheese_pending = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM users WHERE cheese_order_status = 'delivered'")
+    cheese_delivered = cursor.fetchone()[0]
+
+    # Новые пользователи за сегодня
+    cursor.execute("SELECT COUNT(*) FROM users WHERE created_at >= ?", (today_start.isoformat(),))
+    new_today = cursor.fetchone()[0]
+
+    # Новые пользователи за неделю
+    cursor.execute("SELECT COUNT(*) FROM users WHERE created_at >= ?", (week_start.isoformat(),))
+    new_week = cursor.fetchone()[0]
 
     conn.close()
 
     return {
         "total_users": total_users,
         "active_users": active_users,
-        "total_revenue": total_revenue
+        "trial_users": trial_users,
+        "paid_users": paid_users,
+        "total_revenue": total_revenue,
+        "today_revenue": today_revenue,
+        "week_revenue": week_revenue,
+        "month_revenue": month_revenue,
+        "tariffs_stats": tariffs_stats,
+        "cheese_orders": cheese_orders,
+        "cheese_pending": cheese_pending,
+        "cheese_delivered": cheese_delivered,
+        "new_today": new_today,
+        "new_week": new_week
     }
 
 def get_all_active_users() -> list:
