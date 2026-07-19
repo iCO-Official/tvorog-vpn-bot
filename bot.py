@@ -50,8 +50,11 @@ logger = logging.getLogger(__name__)
 def get_main_menu_keyboard():
     """Клавиатура главного меню"""
     return [
-        [InlineKeyboardButton("🎁 Забрать подарок", callback_data="claim_gift")],
-        [InlineKeyboardButton("💳 Купить подписку", callback_data="buy")],
+        [InlineKeyboardButton("💳 Моя подписка", callback_data="my_subscription")],
+        [InlineKeyboardButton("📱 Мои устройства", callback_data="my_devices")],
+        [InlineKeyboardButton("❤️ Рекомендовать друзьям", callback_data="referral")],
+        [InlineKeyboardButton("⚡ Ускорение Telegram", callback_data="telegram_boost")],
+        [InlineKeyboardButton("🌐 Личный кабинет", callback_data="personal_account")],
         [InlineKeyboardButton("❓ Помощь", callback_data="help")]
     ]
 
