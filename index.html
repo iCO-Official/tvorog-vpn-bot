@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Творог VPN — Безопасный и быстрый VPN</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧀</text></svg>">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #0a0a0a;
+            --bg-secondary: #111111;
+            --bg-card: #1a1a1a;
+            --text-primary: #ffffff;
+            --text-secondary: #888888;
+            --accent: #f5c542;
+            --accent-dark: #d4a835;
+            --gradient: linear-gradient(135deg, #f5c542 0%, #ff6b35 100%);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at center, rgba(245, 197, 66, 0.1) 0%, transparent 50%);
+            animation: pulse 8s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.5; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+        }
+
+        .logo {
+            font-size: 100px;
+            margin-bottom: 20px;
+            animation: float 3s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        .hero h1 {
+            font-size: clamp(48px, 8vw, 80px);
+            font-weight: 800;
+            margin-bottom: 20px;
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero p {
+            font-size: clamp(18px, 3vw, 24px);
+            color: var(--text-secondary);
+            max-width: 600px;
+            margin-bottom: 40px;
+        }
+
+        .cta-buttons {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .btn {
+            padding: 16px 32px;
+            border-radius: 50px;
+            font-size: 18px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: none;
+        }
+
+        .btn-primary {
+            background: var(--gradient);
+            color: #000;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px rgba(245, 197, 66, 0.3);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--text-primary);
+            border: 2px solid var(--accent);
+        }
+
+        .btn-secondary:hover {
+            background: var(--accent);
+            color: #000;
+        }
+
+        /* Features Section */
+        .features {
+            padding: 100px 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .section-title {
+            text-align: center;
+            font-size: clamp(32px, 5vw, 48px);
+            font-weight: 700;
+            margin-bottom: 60px;
+        }
+
+        .section-title span {
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+        }
+
+        .feature-card {
+            background: var(--bg-card);
+            border-radius: 20px;
+            padding: 40px;
+            transition: all 0.3s ease;
+            border: 1px solid transparent;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            border-color: var(--accent);
+        }
+
+        .feature-icon {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+
+        .feature-card h3 {
+            font-size: 24px;
+            margin-bottom: 15px;
+            color: var(--text-primary);
+        }
+
+        .feature-card p {
+            color: var(--text-secondary);
+            font-size: 16px;
+        }
+
+        /* Pricing Section */
+        .pricing {
+            padding: 100px 20px;
+            background: var(--bg-secondary);
+        }
+
+        .pricing-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 30px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .price-card {
+            background: var(--bg-card);
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            position: relative;
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
+        }
+
+        .price-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .price-card.popular {
+            border-color: var(--accent);
+            transform: scale(1.05);
+        }
+
+        .price-card.popular::before {
+            content: 'ХИТ';
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--gradient);
+            color: #000;
+            padding: 5px 20px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .price-card h3 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            color: var(--text-primary);
+        }
+
+        .price {
+            font-size: 48px;
+            font-weight: 800;
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin: 20px 0;
+        }
+
+        .price span {
+            font-size: 18px;
+            color: var(--text-secondary);
+        }
+
+        .price-features {
+            list-style: none;
+            margin: 30px 0;
+            text-align: left;
+        }
+
+        .price-features li {
+            padding: 10px 0;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .price-features li::before {
+            content: '✓';
+            color: var(--accent);
+            font-weight: bold;
+        }
+
+        .price-card .btn {
+            width: 100%;
+        }
+
+        /* Servers Section */
+        .servers {
+            padding: 100px 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .servers-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }
+
+        .server-card {
+            background: var(--bg-card);
+            border-radius: 15px;
+            padding: 30px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .server-card:hover {
+            transform: scale(1.05);
+            border: 1px solid var(--accent);
+        }
+
+        .server-flag {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .server-name {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .server-ping {
+            color: var(--accent);
+            font-size: 14px;
+            margin-top: 5px;
+        }
+
+        /* CTA Section */
+        .cta {
+            padding: 100px 20px;
+            text-align: center;
+            background: var(--bg-secondary);
+        }
+
+        .cta h2 {
+            font-size: clamp(32px, 5vw, 48px);
+            margin-bottom: 20px;
+        }
+
+        .cta p {
+            color: var(--text-secondary);
+            font-size: 20px;
+            margin-bottom: 40px;
+        }
+
+        /* Footer */
+        footer {
+            padding: 40px 20px;
+            text-align: center;
+            border-top: 1px solid var(--bg-card);
+        }
+
+        footer p {
+            color: var(--text-secondary);
+        }
+
+        /* Mobile Responsive */
+        @media (max-width: 768px) {
+            .logo {
+                font-size: 80px;
+            }
+
+            .hero h1 {
+                font-size: 36px;
+            }
+
+            .hero p {
+                font-size: 16px;
+            }
+
+            .btn {
+                padding: 14px 28px;
+                font-size: 16px;
+            }
+
+            .feature-card, .price-card {
+                padding: 30px;
+            }
+
+            .price-card.popular {
+                transform: scale(1);
+            }
+        }
+
+        /* Animations */
+        @media (prefers-reduced-motion: no-preference) {
+            .feature-card, .price-card, .server-card {
+                opacity: 0;
+                transform: translateY(30px);
+                animation: fadeInUp 0.6s ease forwards;
+            }
+
+            .feature-card:nth-child(1) { animation-delay: 0.1s; }
+            .feature-card:nth-child(2) { animation-delay: 0.2s; }
+            .feature-card:nth-child(3) { animation-delay: 0.3s; }
+
+            @keyframes fadeInUp {
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="logo">🧀</div>
+        <h1>Творог VPN</h1>
+        <p>Безопасный и быстрый VPN для обхода блокировок. Защити свой трафик уже сегодня.</p>
+        <div class="cta-buttons">
+            <a href="https://t.me/tvorog_vpn_bot" class="btn btn-primary">Открыть бота</a>
+            <a href="#pricing" class="btn btn-secondary">Тарифы</a>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="features">
+        <h2 class="section-title">Почему <span>Творог VPN</span>?</h2>
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">🛡️</div>
+                <h3>Безопасность</h3>
+                <p>Все данные зашифрованы протоколом VLESS. Никто не узнает ваш IP-адрес.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <h3>Скорость</h3>
+                <p>Серверы оптимизированы для максимальной скорости. Стримьте видео без задержек.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🌍</div>
+                <h3>Много серверов</h3>
+                <p>Более 10 стран: Нидерланды, Германия, Франция, США и другие.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📱</div>
+                <h3>Все устройства</h3>
+                <p>Работает на iPhone, Android, Windows, Mac и других устройствах.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🎯</div>
+                <h3>Белые IP</h3>
+                <p>Специальные серверы с чистыми IP для банков и стриминговых сервисов.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🧀</div>
+                <h3>Творог в подарок</h3>
+                <p>При покупке подписки от 1 месяца — получите настоящий творог домой!</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Servers Section -->
+    <section class="servers">
+        <h2 class="section-title">Наши <span>серверы</span></h2>
+        <div class="servers-grid">
+            <div class="server-card">
+                <div class="server-flag">🇳🇱</div>
+                <div class="server-name">Нидерланды</div>
+                <div class="server-ping">~150 мс</div>
+            </div>
+            <div class="server-card">
+                <div class="server-flag">🇩🇪</div>
+                <div class="server-name">Германия</div>
+                <div class="server-ping">~160 мс</div>
+            </div>
+            <div class="server-card">
+                <div class="server-flag">🇫🇷</div>
+                <div class="server-name">Франция</div>
+                <div class="server-ping">~180 мс</div>
+            </div>
+            <div class="server-card">
+                <div class="server-flag">🇫🇮</div>
+                <div class="server-name">Финляндия</div>
+                <div class="server-ping">~170 мс</div>
+            </div>
+            <div class="server-card">
+                <div class="server-flag">🇺🇸</div>
+                <div class="server-name">США</div>
+                <div class="server-ping">~200 мс</div>
+            </div>
+            <div class="server-card">
+                <div class="server-flag">🇪🇸</div>
+                <div class="server-name">Испания</div>
+                <div class="server-ping">~190 мс</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing Section -->
+    <section class="pricing" id="pricing">
+        <h2 class="section-title">Выбери свой <span>тариф</span></h2>
+        <div class="pricing-grid">
+            <div class="price-card">
+                <h3>На неделю</h3>
+                <div class="price">99 ₽</div>
+                <p style="color: var(--text-secondary);">7 дней</p>
+                <ul class="price-features">
+                    <li>Все серверы</li>
+                    <li>Безлимитный трафик</li>
+                    <li>3 устройства</li>
+                    <li>Белые IP</li>
+                </ul>
+                <a href="https://t.me/tvorog_vpn_bot" class="btn btn-secondary">Выбрать</a>
+            </div>
+            <div class="price-card popular">
+                <h3>На месяц</h3>
+                <div class="price">299 ₽</div>
+                <p style="color: var(--text-secondary);">30 дней</p>
+                <ul class="price-features">
+                    <li>Все серверы</li>
+                    <li>Безлимитный трафик</li>
+                    <li>3 устройства</li>
+                    <li>Белые IP</li>
+                    <li>🧀 Творог в подарок</li>
+                </ul>
+                <a href="https://t.me/tvorog_vpn_bot" class="btn btn-primary">Выбрать</a>
+            </div>
+            <div class="price-card">
+                <h3>На 3 месяца</h3>
+                <div class="price">699 ₽</div>
+                <p style="color: var(--text-secondary);">90 дней</p>
+                <ul class="price-features">
+                    <li>Все серверы</li>
+                    <li>Безлимитный трафик</li>
+                    <li>3 устройства</li>
+                    <li>Белые IP</li>
+                    <li>🧀 Творог в подарок</li>
+                </ul>
+                <a href="https://t.me/tvorog_vpn_bot" class="btn btn-secondary">Выбрать</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta">
+        <h2>Готов начать?</h2>
+        <p>Присоединяйся к тысячам пользователей Творог VPN</p>
+        <a href="https://t.me/tvorog_vpn_bot" class="btn btn-primary">Открыть бота в Telegram</a>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <p>🧀 Творог VPN © 2024. Безопасный интернет для всех.</p>
+    </footer>
+</body>
+</html>

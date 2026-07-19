@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 def get_main_menu_keyboard():
     """Клавиатура главного меню"""
     return [
-        [InlineKeyboardButton("🧀 Купить VPN", callback_data="buy")],
+        [InlineKeyboardButton("🔒 Купить VPN", callback_data="buy")],
         [InlineKeyboardButton("🎁 Получить творог", callback_data="gift")],
         [InlineKeyboardButton("📊 Мой статус", callback_data="status")],
         [InlineKeyboardButton("🌍 Серверы", callback_data="servers")],
@@ -126,10 +126,10 @@ async def gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not is_cheese_eligible(user_id):
         if user["cheese_order_status"] != "none":
-            await update.message.reply_text("🧀 Ты уже получил творог в подарок!\nОдна упаковка на аккаунт 🎁")
+            await update.message.reply_text("🔒 Ты уже получил творог в подарок!\nОдна упаковка на аккаунт 🎁")
         else:
             await update.message.reply_text(
-                "🧀 <b>Творог в подарок!</b>\n\n"
+                "🔒 <b>Творог в подарок!</b>\n\n"
                 "Этот подарок только для тех, кто купил подписку от 1 месяца.\n\n"
                 "Купи подписку через /buy и получи настоящий творог домой! 🎁",
                 parse_mode='HTML'
@@ -138,7 +138,7 @@ async def gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["waiting_for_address"] = True
     await update.message.reply_text(
-        "🧀 <b>Поздравляю! Ты получаешь творог в подарок!</b>\n\n"
+        "🔒 <b>Поздравляю! Ты получаешь творог в подарок!</b>\n\n"
         "Напиши свой адрес для доставки:\n\n"
         "📝 <b>Формат:</b>\nГород, улица, дом, квартира\n\n"
         "Пример: Москва, ул. Пушкина, д. 10, кв. 5",
@@ -176,7 +176,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Формируем сообщение для админа
         admin_text = (
-            f"🧀 <b>Новый заказ на творог!</b>\n\n"
+            f"🔒 <b>Новый заказ на творог!</b>\n\n"
             f"👤 @{username} (ID: {user_id})\n"
             f"📍 Адрес: {address}\n\n"
             f"📦 Творог Коровка из Кореновки 180г (~76₽)\n\n"
@@ -194,7 +194,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "✅ <b>Адрес принят!</b>\n\n"
             "Мы заказываем творог на Ozon.\n"
-            "Ожидай доставку в ближайшие дни! 🧀",
+            "Ожидай доставку в ближайшие дни! 🔒",
             parse_mode='HTML'
         )
 
@@ -319,7 +319,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Творог при подписке от 1 месяца
                 if tariff_key in ["month", "quarter", "year"]:
                     await context.bot.send_message(chat_id,
-                        "🧀 <b>Поздравляю! Ты получаешь творог!</b>\n\n"
+                        "🔒 <b>Поздравляю! Ты получаешь творог!</b>\n\n"
                         "Нажми кнопку ниже и выбери город:",
                         parse_mode='HTML'
                     )
@@ -384,16 +384,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Показываем выбор города
             reply_markup = get_city_keyboard()
             await context.bot.send_message(chat_id,
-                "🧀 <b>Поздравляю! Творог в подарок!</b>\n\n"
+                "🔒 <b>Поздравляю! Творог в подарок!</b>\n\n"
                 "Выбери свой город для доставки:",
                 parse_mode='HTML', reply_markup=reply_markup
             )
         else:
             user = get_user(user_id)
             if user and user["cheese_order_status"] != "none":
-                text = "🧀 Ты уже получил творог!\nОдна упаковка на аккаунт 🎁"
+                text = "🔒 Ты уже получил творог!\nОдна упаковка на аккаунт 🎁"
             else:
-                text = "🧀 <b>Творог в подарок!</b>\n\nТолько при покупке от 1 месяца.\nКупи через /buy! 🎁"
+                text = "🔒 <b>Творог в подарок!</b>\n\nТолько при покупке от 1 месяца.\nКупи через /buy! 🎁"
             await context.bot.send_message(chat_id, text, parse_mode='HTML')
 
     # === ВЫБОР ГОРОДА ===
@@ -454,7 +454,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📍 Пункт: {pvz['name']}\n"
             f"📍 Адрес: {pvz['address']}\n\n"
             f"Мы заказываем творог на Ozon.\n"
-            f"Ожидай доставку в ближайшие дни! 🧀\n\n"
+            f"Ожидай доставку в ближайшие дни! 🔒\n\n"
             f"💡 <i>Творог можно добавить в кашу или есть просто так 😋</i>",
             parse_mode='HTML'
         )
@@ -493,7 +493,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             with open(f"configs/{user_id}.conf", "rb") as f:
                 await context.bot.send_document(chat_id,
                     document=InputFile(f),
-                    caption="🧀 <b>Конфиг Творог VPN</b>\n\nИмпортируй в Happ или MantaRay",
+                    caption="🔒 <b>Конфиг Творог VPN</b>\n\nИмпортируй в Happ или MantaRay",
                     parse_mode='HTML'
                 )
 
@@ -531,7 +531,7 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # Творог в подарок при подписке от 1 месяца
         if tariff_key in ["month", "quarter", "year"]:
             await update.message.reply_text(
-                "🧀 <b>Поздравляю! Ты получаешь творог!</b>\n\n"
+                "🔒 <b>Поздравляю! Ты получаешь творог!</b>\n\n"
                 "Напиши /gift и укажи адрес доставки! 🎁",
                 parse_mode='HTML'
             )
@@ -582,7 +582,7 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 ━━━━━━━━━━━━━━━━━━━━━━
 
-🧀 <b>Творог:</b>
+🔒 <b>Творог:</b>
   • Заказов: {stats['cheese_orders']}
   • Ожидают: {stats['cheese_pending']}
   • Доставлено: {stats['cheese_delivered']}
@@ -647,9 +647,9 @@ async def cheese_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     orders = get_pending_cheese_orders()
     if not orders:
-        await update.message.reply_text("🧀 Нет pending заказов")
+        await update.message.reply_text("🔒 Нет pending заказов")
         return
-    text = "🧀 <b>Pending заказы:</b>\n\n"
+    text = "🔒 <b>Pending заказы:</b>\n\n"
     for o in orders:
         text += f"👤 @{o['username']} (ID: {o['user_id']})\n📍 {o['address']}\n✅ /set_cheese {o['user_id']} ordered\n\n"
     await update.message.reply_text(text, parse_mode='HTML')
@@ -687,7 +687,7 @@ async def order_cheese(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ozon_link = generate_ozon_link(address)
 
         await update.message.reply_text(
-            f"🧀 <b>Заказ творога</b>\n\n"
+            f"🔒 <b>Заказ творога</b>\n\n"
             f"👤 @{username} (ID: {user_id})\n"
             f"📍 Адрес: {address}\n\n"
             f"📦 {OZON_PRODUCT_NAME}\n"
@@ -724,7 +724,7 @@ def main():
     # Текст (для адреса)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    print(f"🧀 {BOT_NAME} запущен!")
+    print(f"🔒 {BOT_NAME} запущен!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':

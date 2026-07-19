@@ -71,7 +71,7 @@ def test_telegram_import():
 def main():
     """Запуск всех тестов"""
     print("=" * 50)
-    print("🧀 Тестирование Творог VPN Bot")
+    print("🔒 Тестирование Творог VPN Bot")
     print("=" * 50)
     print()
 

@@ -138,7 +138,7 @@ def format_order_message(username: str, user_id: int, city_id: str, pvz_id: str)
         return "❌ Ошибка: пункт выдачи не найден"
 
     return (
-        f"🧀 <b>Новый заказ на творог!</b>\n\n"
+        f"📦 <b>Новый заказ на творог!</b>\n\n"
         f"👤 Пользователь: @{username} (ID: {user_id})\n"
         f"🏙️ Город: {city_name}\n"
         f"📍 Пункт выдачи: {pvz['name']}\n"

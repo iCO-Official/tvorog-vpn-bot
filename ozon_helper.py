@@ -42,7 +42,7 @@ def format_cheese_order_message(username: str, user_id: int, address: str) -> st
     ozon_link = generate_ozon_link(address)
 
     return (
-        f"🧀 <b>Новый заказ на творог!</b>\n\n"
+        f"📦 <b>Новый заказ на творог!</b>\n\n"
         f"👤 Пользователь: @{username} (ID: {user_id})\n"
         f"📍 Адрес: {address}\n\n"
         f"🛒 <b>Закажи на Ozon:</b>\n"
