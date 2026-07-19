@@ -49,11 +49,20 @@ logger = logging.getLogger(__name__)
 def get_main_menu_keyboard():
     """Клавиатура главного меню"""
     return [
-        [InlineKeyboardButton("🔒 Купить VPN", callback_data="buy")],
-        [InlineKeyboardButton("🎁 Получить творог", callback_data="gift")],
-        [InlineKeyboardButton("📊 Мой статус", callback_data="status")],
-        [InlineKeyboardButton("🌍 Серверы", callback_data="servers")],
-        [InlineKeyboardButton("❓ Помощь", callback_data="help")]
+        [InlineKeyboardButton("Забрать подарок", callback_data="claim_gift")],
+        [InlineKeyboardButton("Купить подписку", callback_data="buy")],
+        [InlineKeyboardButton("Помощь", callback_data="help")]
+    ]
+
+# Клавиатура выбора устройства
+def get_device_keyboard():
+    """Клавиатура выбора устройства"""
+    return [
+        [InlineKeyboardButton("iPhone, iPad", callback_data="install_iphone")],
+        [InlineKeyboardButton("Android", callback_data="install_android")],
+        [InlineKeyboardButton("Windows", callback_data="install_windows")],
+        [InlineKeyboardButton("Mac, MacBook", callback_data="install_mac")],
+        [InlineKeyboardButton("Главное меню", callback_data="back_to_menu")]
     ]
 
 # Команда /start
@@ -62,10 +71,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db_user = create_user(user.id, user.username or user.first_name)
 
-    reply_markup = InlineKeyboardMarkup(get_main_menu_keyboard())
+    keyboard = [
+        [InlineKeyboardButton("Забрать подарок", callback_data="claim_gift")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
-        WELCOME_TEXT.format(name=user.first_name),
+        WELCOME_TEXT,
         parse_mode='HTML',
         reply_markup=reply_markup
     )
@@ -73,7 +85,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Команда /help
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /help"""
-    await update.message.reply_text(HELP_TEXT, parse_mode='HTML')
+    keyboard = [
+        [InlineKeyboardButton("Написать в поддержку", url="https://t.me/tvorog_support")],
+        [InlineKeyboardButton("В меню", callback_data="back_to_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(HELP_TEXT, parse_mode='HTML', reply_markup=reply_markup)
 
 # Команда /buy
 async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -81,9 +98,9 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = []
     for key, tariff in TARIFFS.items():
         if tariff["price"] == 0:
-            text = f"🆓 {tariff['name']} — бесплатно"
+            text = f"{tariff['name']} — бесплатно"
         else:
-            emoji = {"week": "⏰", "month": "📅", "quarter": "📆", "year": "🎯"}.get(key, "💳")
+            emoji = {"week": "", "month": "", "quarter": "", "year": ""}.get(key, "")
             text = f"{emoji} {tariff['name']} — {tariff['price']} ₽"
         keyboard.append([InlineKeyboardButton(text, callback_data=f"buy_{key}")])
 
@@ -377,6 +394,123 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         await context.bot.send_message(chat_id, HELP_TEXT, parse_mode='HTML', reply_markup=reply_markup)
 
+    # === ЗАБРАТЬ ПОДАРОК (3 дня бесплатно) ===
+    elif data == "claim_gift":
+        user_id = query.from_user.id
+        user = get_user(user_id)
+
+        # Проверяем, брал ли уже пробный период
+        if user and user["expires_at"]:
+            from datetime import datetime
+            expires = datetime.fromisoformat(user["expires_at"])
+            if expires > datetime.now():
+                # Уже есть активная подписка
+                keyboard = [[InlineKeyboardButton("Выбрать устройство", callback_data="select_device")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await context.bot.send_message(chat_id,
+                    "У вас уже есть активная подписка!\n\n"
+                    "Выберите устройство для установки:",
+                    reply_markup=reply_markup
+                )
+                return
+
+        # Активируем пробный период
+        activate_subscription(user_id, 3)
+
+        keyboard = [[InlineKeyboardButton("Выбрать устройство", callback_data="select_device")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await context.bot.send_message(chat_id,
+            "Пробный период на 3 дня активирован!\n\n"
+            "Теперь выберите ваше устройство, чтобы получить VPN-ключ:",
+            reply_markup=reply_markup
+        )
+
+    # === ВЫБОР УСТРОЙСТВА ===
+    elif data == "select_device" or data == "devices":
+        reply_markup = InlineKeyboardMarkup(get_device_keyboard())
+        await context.bot.send_message(chat_id,
+            "Выберите устройство, чтобы получить VPN-ключ:",
+            reply_markup=reply_markup
+        )
+
+    # === УСТАНОВКА IPHONE ===
+    elif data == "install_iphone":
+        keyboard = [
+            [InlineKeyboardButton("Получить VPN-ключ", callback_data="get_config_iphone")],
+            [InlineKeyboardButton("Главное меню", callback_data="back_to_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.send_message(chat_id, INSTALL_IPHONE_TEXT, parse_mode='HTML', reply_markup=reply_markup)
+
+    # === УСТАНОВКА ANDROID ===
+    elif data == "install_android":
+        keyboard = [
+            [InlineKeyboardButton("Получить VPN-ключ", callback_data="get_config_android")],
+            [InlineKeyboardButton("Главное меню", callback_data="back_to_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.send_message(chat_id, INSTALL_ANDROID_TEXT, parse_mode='HTML', reply_markup=reply_markup)
+
+    # === УСТАНОВКА WINDOWS ===
+    elif data == "install_windows":
+        keyboard = [
+            [InlineKeyboardButton("Получить VPN-ключ", callback_data="get_config_windows")],
+            [InlineKeyboardButton("Главное меню", callback_data="back_to_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.send_message(chat_id, INSTALL_WINDOWS_TEXT, parse_mode='HTML', reply_markup=reply_markup)
+
+    # === УСТАНОВКА MAC ===
+    elif data == "install_mac":
+        keyboard = [
+            [InlineKeyboardButton("Получить VPN-ключ", callback_data="get_config_mac")],
+            [InlineKeyboardButton("Главное меню", callback_data="back_to_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.send_message(chat_id, INSTALL_MAC_TEXT, parse_mode='HTML', reply_markup=reply_markup)
+
+    # === ПОЛУЧИТЬ VPN-КЛЮЧ (для всех устройств) ===
+    elif data.startswith("get_config_iphone") or data.startswith("get_config_android") or data.startswith("get_config_windows") or data.startswith("get_config_mac"):
+        user_id = query.from_user.id
+        user = get_user(user_id)
+
+        if user and is_subscription_active(user_id):
+            # Генерируем ключи если нет
+            if not user["wg_private_key"]:
+                private_key, public_key = generate_wg_keys()
+                update_user(user_id, wg_private_key=private_key, wg_public_key=public_key)
+                user = get_user(user_id)
+
+            # Создаём конфиг
+            config, client_ip = create_client_config(user_id, user["wg_private_key"], user["wg_public_key"])
+            save_client_config(user_id, config)
+
+            # Отправляем конфиг
+            with open(f"configs/{user_id}.conf", "rb") as f:
+                await context.bot.send_document(chat_id,
+                    document=InputFile(f),
+                    caption="VPN-ключ готов!\n\nИмпортируйте в Happ",
+                    parse_mode='HTML'
+                )
+
+            # Кнопка добавления в Happ
+            keyboard = [
+                [InlineKeyboardButton("Добавить в Happ", url="https://happ://import")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await context.bot.send_message(chat_id,
+                "Нажмите кнопку ниже, чтобы добавить подписку в Happ.\n"
+                "Или скопируйте ссылку выше и вставьте вручную.",
+                reply_markup=reply_markup
+            )
+        else:
+            await context.bot.send_message(chat_id,
+                "Нет активной подписки.\n"
+                "Нажмите «Забрать подарок» чтобы получить 3 дня бесплатно.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Забрать подарок", callback_data="claim_gift")]])
+            )
+
     # === ПОЛУЧИТЬ ТВОРОГ ===
     elif data == "gift":
         user_id = query.from_user.id
@@ -469,10 +603,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # === ГЛАВНОЕ МЕНЮ ===
     elif data == "back_to_menu":
-        user = query.from_user
-        reply_markup = InlineKeyboardMarkup(get_main_menu_keyboard())
+        keyboard = [
+            [InlineKeyboardButton("Забрать подарок", callback_data="claim_gift")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         await context.bot.send_message(chat_id,
-            WELCOME_TEXT.format(name=user.first_name),
+            WELCOME_TEXT,
             parse_mode='HTML', reply_markup=reply_markup
         )
 
