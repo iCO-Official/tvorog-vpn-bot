@@ -727,5 +727,16 @@ def main():
     print(f"🔒 {BOT_NAME} запущен!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
+def run_api_server():
+    """Запуск API сервера для админ-панели"""
+    from api import run_server
+    import threading
+    thread = threading.Thread(target=run_server, args=(8080,), daemon=True)
+    thread.start()
+
 if __name__ == '__main__':
+    import os
+    # Запускаем API сервер если включено
+    if os.environ.get("ENABLE_API", "false").lower() == "true":
+        run_api_server()
     main()
