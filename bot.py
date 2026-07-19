@@ -49,20 +49,20 @@ logger = logging.getLogger(__name__)
 def get_main_menu_keyboard():
     """Клавиатура главного меню"""
     return [
-        [InlineKeyboardButton("Забрать подарок", callback_data="claim_gift")],
-        [InlineKeyboardButton("Купить подписку", callback_data="buy")],
-        [InlineKeyboardButton("Помощь", callback_data="help")]
+        [InlineKeyboardButton("🎁 Забрать подарок", callback_data="claim_gift")],
+        [InlineKeyboardButton("💳 Купить подписку", callback_data="buy")],
+        [InlineKeyboardButton("❓ Помощь", callback_data="help")]
     ]
 
 # Клавиатура выбора устройства
 def get_device_keyboard():
     """Клавиатура выбора устройства"""
     return [
-        [InlineKeyboardButton("iPhone, iPad", callback_data="install_iphone")],
-        [InlineKeyboardButton("Android", callback_data="install_android")],
-        [InlineKeyboardButton("Windows", callback_data="install_windows")],
-        [InlineKeyboardButton("Mac, MacBook", callback_data="install_mac")],
-        [InlineKeyboardButton("Главное меню", callback_data="back_to_menu")]
+        [InlineKeyboardButton("📱 iPhone, iPad", callback_data="install_iphone")],
+        [InlineKeyboardButton("🤖 Android", callback_data="install_android")],
+        [InlineKeyboardButton("💻 Windows", callback_data="install_windows")],
+        [InlineKeyboardButton("🖥 Mac, MacBook", callback_data="install_mac")],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_menu")]
     ]
 
 # Команда /start
@@ -72,7 +72,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_user = create_user(user.id, user.username or user.first_name)
 
     keyboard = [
-        [InlineKeyboardButton("Забрать подарок", callback_data="claim_gift")]
+        [InlineKeyboardButton("🎁 Забрать подарок", callback_data="claim_gift")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -86,8 +86,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /help"""
     keyboard = [
-        [InlineKeyboardButton("Написать в поддержку", url="https://t.me/tvorog_support")],
-        [InlineKeyboardButton("В меню", callback_data="back_to_menu")]
+        [InlineKeyboardButton("💬 Написать в поддержку", url="https://t.me/tvorog_support")],
+        [InlineKeyboardButton("🏠 В меню", callback_data="back_to_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(HELP_TEXT, parse_mode='HTML', reply_markup=reply_markup)
@@ -98,10 +98,9 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = []
     for key, tariff in TARIFFS.items():
         if tariff["price"] == 0:
-            text = f"{tariff['name']} — бесплатно"
+            text = f"🆓 {tariff['name']} — бесплатно"
         else:
-            emoji = {"week": "", "month": "", "quarter": "", "year": ""}.get(key, "")
-            text = f"{emoji} {tariff['name']} — {tariff['price']} ₽"
+            text = f"💳 {tariff['name']} — {tariff['price']} ₽"
         keyboard.append([InlineKeyboardButton(text, callback_data=f"buy_{key}")])
 
     keyboard.append([InlineKeyboardButton("🔙 Назад в меню", callback_data="back_to_menu")])
@@ -405,11 +404,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             expires = datetime.fromisoformat(user["expires_at"])
             if expires > datetime.now():
                 # Уже есть активная подписка
-                keyboard = [[InlineKeyboardButton("Выбрать устройство", callback_data="select_device")]]
+                keyboard = [[InlineKeyboardButton("📱 Выбрать устройство", callback_data="select_device")]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 await context.bot.send_message(chat_id,
-                    "У вас уже есть активная подписка!\n\n"
-                    "Выберите устройство для установки:",
+                    "🎉 У вас уже есть активная подписка!\n\n"
+                    "📱 Выберите устройство для установки:",
                     reply_markup=reply_markup
                 )
                 return
@@ -417,12 +416,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Активируем пробный период
         activate_subscription(user_id, 3)
 
-        keyboard = [[InlineKeyboardButton("Выбрать устройство", callback_data="select_device")]]
+        keyboard = [[InlineKeyboardButton("📱 Выбрать устройство", callback_data="select_device")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await context.bot.send_message(chat_id,
-            "Пробный период на 3 дня активирован!\n\n"
-            "Теперь выберите ваше устройство, чтобы получить VPN-ключ:",
+            "🎉 Пробный период на 3 дня активирован!\n\n"
+            "📱 Теперь выберите ваше устройство, чтобы получить VPN-ключ:",
             reply_markup=reply_markup
         )
 
@@ -430,15 +429,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "select_device" or data == "devices":
         reply_markup = InlineKeyboardMarkup(get_device_keyboard())
         await context.bot.send_message(chat_id,
-            "Выберите устройство, чтобы получить VPN-ключ:",
+            "📱 Выберите устройство, чтобы получить VPN-ключ:",
             reply_markup=reply_markup
         )
 
     # === УСТАНОВКА IPHONE ===
     elif data == "install_iphone":
         keyboard = [
-            [InlineKeyboardButton("Получить VPN-ключ", callback_data="get_config_iphone")],
-            [InlineKeyboardButton("Главное меню", callback_data="back_to_menu")]
+            [InlineKeyboardButton("🔑 Получить VPN-ключ", callback_data="get_config_iphone")],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await context.bot.send_message(chat_id, INSTALL_IPHONE_TEXT, parse_mode='HTML', reply_markup=reply_markup)
@@ -446,8 +445,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # === УСТАНОВКА ANDROID ===
     elif data == "install_android":
         keyboard = [
-            [InlineKeyboardButton("Получить VPN-ключ", callback_data="get_config_android")],
-            [InlineKeyboardButton("Главное меню", callback_data="back_to_menu")]
+            [InlineKeyboardButton("🔑 Получить VPN-ключ", callback_data="get_config_android")],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await context.bot.send_message(chat_id, INSTALL_ANDROID_TEXT, parse_mode='HTML', reply_markup=reply_markup)
@@ -455,8 +454,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # === УСТАНОВКА WINDOWS ===
     elif data == "install_windows":
         keyboard = [
-            [InlineKeyboardButton("Получить VPN-ключ", callback_data="get_config_windows")],
-            [InlineKeyboardButton("Главное меню", callback_data="back_to_menu")]
+            [InlineKeyboardButton("🔑 Получить VPN-ключ", callback_data="get_config_windows")],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await context.bot.send_message(chat_id, INSTALL_WINDOWS_TEXT, parse_mode='HTML', reply_markup=reply_markup)
@@ -464,8 +463,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # === УСТАНОВКА MAC ===
     elif data == "install_mac":
         keyboard = [
-            [InlineKeyboardButton("Получить VPN-ключ", callback_data="get_config_mac")],
-            [InlineKeyboardButton("Главное меню", callback_data="back_to_menu")]
+            [InlineKeyboardButton("🔑 Получить VPN-ключ", callback_data="get_config_mac")],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await context.bot.send_message(chat_id, INSTALL_MAC_TEXT, parse_mode='HTML', reply_markup=reply_markup)
@@ -604,7 +603,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # === ГЛАВНОЕ МЕНЮ ===
     elif data == "back_to_menu":
         keyboard = [
-            [InlineKeyboardButton("Забрать подарок", callback_data="claim_gift")]
+            [InlineKeyboardButton("🎁 Забрать подарок", callback_data="claim_gift")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await context.bot.send_message(chat_id,
