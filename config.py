@@ -49,8 +49,8 @@ TARIFFS = {
 }
 
 # ЮKassa настройки
-YOOKASSA_SHOP_ID = os.environ.get("YOOKASSA_SHOP_ID", "YOUR_SHOP_ID")
-YOOKASSA_SECRET_KEY = os.environ.get("YOOKASSA_SECRET_KEY", "YOUR_SECRET_KEY")
+YOOKASSA_SHOP_ID = os.environ.get("YOOKASSA_SHOP_ID", "1412568")
+YOOKASSA_SECRET_KEY = os.environ.get("YOOKASSA_SECRET_KEY", "live_vpeOwoU9atdXO_CyOv0ZzW6weVD2_iJ7nbdbTp1e2LQ")
 PAYMENT_METHODS = ["bank_card", "sbp", "yoo_money"]
 
 # Серверы
