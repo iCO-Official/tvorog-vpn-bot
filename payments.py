@@ -32,22 +32,15 @@ def create_payment_link(tariff_key: str, user_id: int) -> dict:
         },
         "confirmation": {
             "type": "redirect",
-            "return_url": f"https://t.me/tvorog_vpn_bot"
+            "return_url": "https://t.me/tvorog_vpn_bot"
         },
         "capture": True,
         "description": f"Творог VPN - {tariff['name']}",
         "metadata": {
             "user_id": str(user_id),
             "tariff": tariff_key
-        },
-        "payment_method_data": {
-            "type": "bank_card"
         }
     }
-
-    # Добавляем доступные способы оплаты
-    if "sbp" in PAYMENT_METHODS:
-        payload["payment_method_data"]["type"] = "sbp"
 
     try:
         # Отправляем запрос
