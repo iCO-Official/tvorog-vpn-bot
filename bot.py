@@ -50,22 +50,20 @@ logger = logging.getLogger(__name__)
 def get_main_menu_keyboard():
     """Клавиатура главного меню"""
     return [
-        [InlineKeyboardButton("💳 Моя подписка", callback_data="my_subscription")],
-        [InlineKeyboardButton("📱 Мои устройства", callback_data="my_devices")],
-        [InlineKeyboardButton("❤️ Рекомендовать друзьям", callback_data="referral")],
-        [InlineKeyboardButton("⚡ Ускорение Telegram", callback_data="telegram_boost")],
-        [InlineKeyboardButton("🌐 Личный кабинет", callback_data="personal_account")],
-        [InlineKeyboardButton("❓ Помощь", callback_data="help")]
+        [InlineKeyboardButton("🔑 Подключиться", callback_data="connect")],
+        [InlineKeyboardButton("🏠 Личный кабинет", callback_data="personal_account"),
+         InlineKeyboardButton("ℹ️ Информация", callback_data="info")]
     ]
 
 # Клавиатура выбора устройства
 def get_device_keyboard():
     """Клавиатура выбора устройства"""
     return [
-        [InlineKeyboardButton("📱 iPhone, iPad", callback_data="install_iphone")],
-        [InlineKeyboardButton("🤖 Android", callback_data="install_android")],
-        [InlineKeyboardButton("💻 Windows", callback_data="install_windows")],
-        [InlineKeyboardButton("🖥 Mac, MacBook", callback_data="install_mac")],
+        [InlineKeyboardButton("🤖 Android", callback_data="install_android"),
+         InlineKeyboardButton("🍎 iPhone/iPad", callback_data="install_iphone")],
+        [InlineKeyboardButton("💻 Windows", callback_data="install_windows"),
+         InlineKeyboardButton("🖥 MacOS", callback_data="install_mac")],
+        [InlineKeyboardButton("🐧 Linux", callback_data="install_linux")],
         [InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_menu")]
     ]
 
@@ -393,9 +391,61 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # === ПОМОЩЬ ===
     elif data == "help":
-        keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="back_to_menu")]]
+        keyboard = [
+            [InlineKeyboardButton("💬 Написать в поддержку", url="https://t.me/tvorog_support")],
+            [InlineKeyboardButton("🏠 Назад в меню", callback_data="back_to_menu")]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await context.bot.send_message(chat_id, HELP_TEXT, parse_mode='HTML', reply_markup=reply_markup)
+
+    # === ПОДКЛЮЧИТЬСЯ (выбор устройства) ===
+    elif data == "connect":
+        reply_markup = InlineKeyboardMarkup(get_device_keyboard())
+        await context.bot.send_message(chat_id,
+            "Выберите устройство, которое хотите подключить:",
+            reply_markup=reply_markup
+        )
+
+    # === ИНФОРМАЦИЯ О СЕРВИСЕ ===
+    elif data == "info":
+        keyboard = [
+            [InlineKeyboardButton("📖 Инструкция", url="https://t.me/tvorog_vpn_bot")],
+            [InlineKeyboardButton("🔑 Тех. поддержка", url="https://t.me/tvorog_support")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.send_message(chat_id, INFO_TEXT, parse_mode='HTML', reply_markup=reply_markup)
+
+    # === ЛИЧНЫЙ КАБИНЕТ ===
+    elif data == "personal_account":
+        user_id = query.from_user.id
+        user = get_user(user_id)
+
+        if user:
+            from datetime import datetime
+            expires = user["expires_at"][:10] if user["expires_at"] else "Неизвестно"
+            is_active = "Активна" if user["expires_at"] and datetime.fromisoformat(user["expires_at"]) > datetime.now() else "Не активна"
+
+            account_text = f"""
+<b>Личный кабинет</b>
+
+<b>ID:</b> {user_id}
+<b>Email:</b> {query.from_user.username or "Не указан"}
+
+<b>Информация о подписке:</b>
+• Текущий план: {is_active}
+• Дата окончания: {expires}
+
+<b>Команды:</b>
+"""
+            keyboard = [
+                [InlineKeyboardButton("🔑 Подключиться", callback_data="connect")],
+                [InlineKeyboardButton("📖 Инструкция", callback_data="help")],
+                [InlineKeyboardButton("🎁 Получить творог", callback_data="gift")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await context.bot.send_message(chat_id, account_text, parse_mode='HTML', reply_markup=reply_markup)
+        else:
+            await context.bot.send_message(chat_id, "Вы ещё не зарегистрированы. Нажмите /start")
 
     # === ЗАБРАТЬ ПОДАРОК (3 дня бесплатно) ===
     elif data == "claim_gift":
@@ -473,8 +523,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         await context.bot.send_message(chat_id, INSTALL_MAC_TEXT, parse_mode='HTML', reply_markup=reply_markup)
 
+    # === УСТАНОВКА LINUX ===
+    elif data == "install_linux":
+        keyboard = [
+            [InlineKeyboardButton("🔑 Получить VPN-ключ", callback_data="get_config_linux")],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.send_message(chat_id, INSTALL_LINUX_TEXT, parse_mode='HTML', reply_markup=reply_markup)
+
     # === ПОЛУЧИТЬ VPN-КЛЮЧ (для всех устройств) ===
-    elif data.startswith("get_config_iphone") or data.startswith("get_config_android") or data.startswith("get_config_windows") or data.startswith("get_config_mac"):
+    elif data.startswith("get_config_iphone") or data.startswith("get_config_android") or data.startswith("get_config_windows") or data.startswith("get_config_mac") or data.startswith("get_config_linux"):
         user_id = query.from_user.id
         user = get_user(user_id)
 
@@ -606,10 +665,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # === ГЛАВНОЕ МЕНЮ ===
     elif data == "back_to_menu":
-        keyboard = [
-            [InlineKeyboardButton("🎁 Забрать подарок", callback_data="claim_gift")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(get_main_menu_keyboard())
         await context.bot.send_message(chat_id,
             WELCOME_TEXT,
             parse_mode='HTML', reply_markup=reply_markup
