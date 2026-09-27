@@ -28,7 +28,7 @@ from payments import card_payments_enabled, create_payment_link, check_payment_s
 from pvz_finder import POPULAR_CITIES, get_city_name, get_pvz_list, get_pvz_by_id, format_order_message
 from subscription import (
     trial_available, trial_days_for, start_trial, record_payment, current_period_days,
-    build_client_config, qr_data_url, attach_referrer, referral_info,
+    build_client_config, reset_client_key, qr_data_url, attach_referrer, referral_info,
 )
 from vpn_manager import WireGuardError
 
@@ -250,6 +250,19 @@ async def api_key(request):
     return web.json_response({"config": config, "qr": qr_data_url(config), "filename": "TvorogVPN.conf"})
 
 
+async def api_key_reset(request):
+    """Перевыпустить ключ (старый перестанет работать)"""
+    user_id = request["tg_user"]["id"]
+    if not is_subscription_active(user_id):
+        return web.json_response({"error": "Подписка не активна"}, status=403)
+    try:
+        config = reset_client_key(user_id)
+    except WireGuardError as e:
+        logger.error("Мини-приложение: ошибка перевыпуска ключа для %s: %s", user_id, e)
+        return web.json_response({"error": "Не удалось перевыпустить ключ. Попробуйте позже."}, status=500)
+    return web.json_response({"config": config, "qr": qr_data_url(config), "filename": "TvorogVPN.conf"})
+
+
 async def api_key_send(request):
     """Прислать ключ файлом в чат с ботом"""
     user_id = request["tg_user"]["id"]
@@ -309,6 +322,7 @@ def create_app(bot) -> web.Application:
     app.router.add_post("/api/pay/check", api_pay_check)
     app.router.add_post("/api/key", api_key)
     app.router.add_post("/api/key/send", api_key_send)
+    app.router.add_post("/api/key/reset", api_key_reset)
     app.router.add_post("/api/gift/cities", api_cities)
     app.router.add_post("/api/gift/pvz", api_pvz)
     app.router.add_post("/api/gift/order", api_gift_order)

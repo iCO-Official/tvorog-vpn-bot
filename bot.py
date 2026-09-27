@@ -1,5 +1,6 @@
 import html
 import logging
+import math
 import os
 import sqlite3
 import sys
@@ -40,7 +41,7 @@ from database import (
 from vpn_manager import save_client_config, add_peer, remove_peer, WireGuardError
 from subscription import (
     trial_available, trial_days_for, record_payment, start_trial, build_client_config, qr_png,
-    attach_referrer, referral_info,
+    attach_referrer, referral_info, reset_client_key,
 )
 from payments import (
     create_payment_link, check_payment_status, card_payments_enabled,
@@ -101,7 +102,9 @@ def format_date(iso: str) -> str:
 
 
 def days_left(iso: str) -> int:
-    return max((datetime.fromisoformat(iso) - datetime.now()).days, 0)
+    """Сколько дней осталось (неполный день считается целым — как в приложении)"""
+    seconds = (datetime.fromisoformat(iso) - datetime.now()).total_seconds()
+    return max(math.ceil(seconds / 86400), 0)
 
 
 def register(update: Update):
@@ -272,6 +275,8 @@ async def show_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = []
     if active:
         keyboard.append([btn("🔑 Подключить устройство", "connect")])
+        if user["wg_public_key"]:
+            keyboard.append([btn("🔄 Перевыпустить ключ", "reset_key")])
     keyboard.append([btn("💳 Продлить подписку" if user["expires_at"] else "💳 Оформить подписку", "buy")])
     if is_cheese_eligible(user_id):
         keyboard.append([btn("🎁 Получить творог", "gift")])
@@ -839,6 +844,25 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_vpn_key(update, context)
     elif data in ("personal_account", "status"):
         await show_account(update, context)
+    elif data == "reset_key":
+        await show(update, context,
+            "<b>🔄 Перевыпустить ключ?</b>\n\n"
+            "Старый ключ перестанет работать на всех устройствах — "
+            "пригодится, если он попал к посторонним. Новый ключ придёт сюда.",
+            [[btn("Да, перевыпустить", "reset_key_yes")], [btn("‹ Назад", "personal_account")]]
+        )
+    elif data == "reset_key_yes":
+        if not is_subscription_active(update.effective_user.id):
+            await show_no_subscription(update, context)
+            return
+        try:
+            reset_client_key(update.effective_user.id)
+        except WireGuardError as e:
+            logger.error("Ошибка перевыпуска ключа для %s: %s", update.effective_user.id, e)
+            await show(update, context, "<b>⚠️ Не удалось перевыпустить ключ</b>\n\nПопробуйте позже.", [MENU_ROW])
+            return
+        await show(update, context, "<b>✅ Ключ перевыпущен</b>\n\nСтарый ключ отключён. Новый — ниже.")
+        await send_vpn_key(update, context)
     elif data == "referral":
         await show_referral(update, context)
     elif data == "info":

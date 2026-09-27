@@ -144,6 +144,31 @@ button.row:active { background: var(--fill); }
 .badge.joined { color: var(--hint); font-weight: 500; }
 .empty { padding: 22px 16px; text-align: center; color: var(--hint); font-size: 15px; }
 
+/* Пошаговый путь (карточки, соединённые пунктиром) */
+.flow { position: relative; }
+.flow > .box + .box { margin-top: 26px; overflow: visible; }
+.flow > .box + .box::before { content: ""; position: absolute; left: 50%; top: -26px; height: 26px; border-left: 2px dashed color-mix(in srgb, var(--accent) 55%, transparent); }
+.flow > .box { position: relative; }
+.step-head { display: flex; align-items: center; gap: 12px; padding: 16px 16px 0; }
+.step-head .num { width: 30px; height: 30px; font-size: 15px; }
+.step-title { font-weight: 600; font-size: 17px; }
+.step-body { padding: 10px 16px 16px; }
+.step-body p { margin: 0; color: var(--hint); font-size: 15px; }
+.step-body p + p { margin-top: 6px; }
+.hl { color: var(--accent); font-weight: 600; }
+.step-body .stats { margin: 4px -16px -16px; border-top: 1px solid var(--line); }
+
+/* Аккаунт */
+.acc-head { display: flex; align-items: center; gap: 12px; padding: 16px; }
+.acc-title { font-weight: 600; font-size: 17px; }
+.field { display: flex; align-items: center; gap: 12px; background: var(--fill); border-radius: 12px; padding: 10px 8px 10px 14px; margin: 0 16px 8px; }
+.field-label { font-size: 12px; text-transform: uppercase; letter-spacing: .3px; color: var(--hint); }
+.field-value { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.field .row-main { min-width: 0; }
+.icon-btn { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; color: var(--accent); background: var(--surface); flex: none; }
+.icon-btn:active { opacity: .7; }
+.acc-actions { display: grid; gap: 8px; padding: 8px 16px 16px; }
+
 /* Профиль */
 .me { display: flex; flex-direction: column; align-items: center; padding: 8px 0 4px; }
 .me-ava { width: 84px; height: 84px; border-radius: 50%; background: var(--accent); color: var(--accent-text); display: grid; place-items: center; font-size: 32px; font-weight: 600; overflow: hidden; }
@@ -243,6 +268,7 @@ body.sheet-open .sheet { transform: none; }
   <symbol id="hash" viewBox="0 0 24 24"><path d="M5 9h14M5 15h14M10 4.5 8.5 19.5M15.5 4.5 14 19.5"/></symbol>
   <symbol id="bot" viewBox="0 0 24 24"><rect x="4.5" y="8" width="15" height="11.5" rx="3"/><path d="M12 4.5V8M9.5 13h0M14.5 13h0M10 16.5h4"/></symbol>
   <symbol id="pin" viewBox="0 0 24 24"><path d="M12 20.5s-6.5-5.8-6.5-10.8a6.5 6.5 0 0 1 13 0c0 5-6.5 10.8-6.5 10.8z"/><circle cx="12" cy="9.8" r="2.3"/></symbol>
+  <symbol id="refresh" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 0 1-13.2 4.9M4.5 12a7.5 7.5 0 0 1 13.2-4.9M18 3.5v4h-4M6 20.5v-4h4"/></symbol>
   <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
 </svg>
 
@@ -463,35 +489,35 @@ body.sheet-open .sheet { transform: none; }
   }
   async function getKey(btn) {
     haptic("medium");
-    await busy(btn, async () => { ui.key = await api("/api/key"); S.has_key = true; haptic("success"); connect(); home(); });
+    await busy(btn, async () => { ui.key = await api("/api/key"); S.has_key = true; haptic("success"); connect(); home(); profile(); });
   }
 
   // ── Друзья ──
   function friends() {
     const R = S.referral;
     const status = { paid: ["paid", `+${days(R.bonus_days)}`], trial: ["trial", "Пробный период"], joined: ["joined", "Зарегистрировался"] };
+    const step = (n, title, body) => `<div class="box"><div class="step-head"><span class="num">${n}</span><span class="step-title">${title}</span></div><div class="step-body">${body}</div></div>`;
     $("#s-friends").innerHTML = `
       ${head()}
-      <h1>Друзья</h1>
-      <p class="lead">Приглашайте друзей и продлевайте подписку бесплатно.</p>
-      <div class="box ref-hero">
-        <div class="ref-num">+${days(R.bonus_days)}</div>
-        <div class="ref-text">за каждого друга, который оформит подписку</div>
-        <div class="ref-sub">Другу — ${days(R.friend_trial_days)} бесплатно вместо ${R.base_trial_days}.</div>
-        <div class="link"><span>${esc(R.link.replace("https://", ""))}</span><button data-act="copy-link" aria-label="Скопировать">${svg("copy", "s")}</button></div>
-        <button class="btn main" data-act="share">${svg("share", "s")}Пригласить друга</button>
-      </div>
-      <div class="gap"></div>
-      <div class="box stats">
-        <div class="stat"><b>${R.invited}</b><span>приглашено</span></div>
-        <div class="stat"><b>${R.paid}</b><span>оформили</span></div>
-        <div class="stat"><b>${R.earned_days}</b><span>${plural(R.earned_days, "день", "дня", "дней")} получено</span></div>
-      </div>
-      <div class="cap">Как это работает</div>
-      <div class="box">
-        <div class="row"><span class="num">1</span><span class="row-main">Отправьте другу свою ссылку</span></div>
-        <div class="row"><span class="num">2</span><span class="row-main">Друг получает ${days(R.friend_trial_days)} бесплатно</span></div>
-        <div class="row"><span class="num">3</span><span class="row-main">Когда он оформит подписку, вам начислится +${days(R.bonus_days)}</span></div>
+      <h1>Приглашайте друзей — получайте дни</h1>
+      <p class="lead">Три шага, и подписка продлевается бесплатно.</p>
+      <div class="flow">
+        ${step(1, "Скопируйте ссылку", `
+          <div class="link" style="margin:2px 0 10px"><span>${esc(R.link.replace("https://", ""))}</span><button data-act="copy-link" aria-label="Скопировать">${svg("copy", "s")}</button></div>
+          <button class="btn main" data-act="share">${svg("share", "s")}Отправить другу</button>
+          <p style="margin-top:12px">За каждого друга: <span class="hl">+${days(R.bonus_days)}</span></p>`)}
+        ${step(2, "Друг подключается", `
+          <p>Он получит <span class="hl">${days(R.friend_trial_days)} бесплатно</span> вместо ${R.base_trial_days}.</p>
+          <p>Когда друг оформит подписку, вам начислится <span class="hl">+${days(R.bonus_days)}</span>.</p>`)}
+        ${step(3, "Получайте дни", `
+          <p>Чем больше друзей, тем дольше вы пользуетесь VPN бесплатно. Ограничений нет.</p>
+          <div class="stats">
+            <div class="stat"><b>${R.invited}</b><span>приглашено</span></div>
+            <div class="stat"><b>${R.paid}</b><span>оформили</span></div>
+            <div class="stat"><b>${R.earned_days}</b><span>${plural(R.earned_days, "день", "дня", "дней")} получено</span></div>
+          </div>`)}
+        <div class="box"><div class="step-head"><span class="ico">${svg("chat")}</span><span class="step-title">Остались вопросы?</span></div>
+          <div class="step-body"><button class="btn soft" data-act="support">Написать в поддержку</button></div></div>
       </div>
       <div class="cap">Приглашённые</div>
       <div class="box">${R.friends.length ? R.friends.map((f) => `
@@ -505,26 +531,42 @@ body.sheet-open .sheet { transform: none; }
   function profile() {
     const name = [me.first_name, me.last_name].filter(Boolean).join(" ") || "Пользователь";
     const s = S.subscription;
-    const cheese = { none: S.cheese.eligible ? "Доступен" : "—", pending: "Оформляется", ordered: "Заказан", delivered: "Доставлен" }[S.cheese.status] || "—";
+    const cheese = { none: S.cheese.eligible ? "Доступен" : "от 1 месяца", pending: "Оформляется", ordered: "Заказан", delivered: "Доставлен" }[S.cheese.status] || "—";
+    const keyState = !s.active ? "Нет подписки" : S.has_key ? "Активен" : "Не выдан";
     $("#s-profile").innerHTML = `
       ${head()}
       <div class="me"><div class="me-ava">${me.photo_url ? `<img src="${esc(me.photo_url)}" alt="">` : esc(initials(name))}</div>
-        <div class="me-name">${esc(name)}</div><div class="me-sub">${me.username ? "@" + esc(me.username) : `ID ${esc(me.id || "")}`}</div></div>
-      <div class="cap">Подписка</div>
+        <div class="me-name">${esc(name)}</div><div class="me-sub">${me.username ? "@" + esc(me.username) : ""}</div></div>
+      <div class="gap"></div>
       <div class="box">
-        ${row("shield", "Статус", { val: s.active ? `<span style="color:var(--ok)">Активна</span>` : "Не активна" })}
-        ${row("cal", s.active ? "Действует до" : "Окончание", { val: s.expires || "—" })}
-        ${row("dev", "Устройства", { val: `до ${S.max_devices}` })}
-        ${row("hash", "ID", { val: esc(me.id || "") })}
+        <div class="acc-head"><span class="ico">${svg("shield")}</span>
+          <span class="row-main"><div class="acc-title">${s.active ? "Подписка активна" : "У вас нет подписки"}</div>
+          <div class="row-sub">${s.active ? `до ${s.expires} · до ${S.max_devices} устройств` : s.ever ? `закончилась ${s.expires}` : "Оформите подписку или попробуйте бесплатно"}</div></span></div>
+        <div class="field"><span class="row-main"><div class="field-label">ID</div><div class="field-value">${esc(me.id || "")}</div></span>
+          <button class="icon-btn" data-act="copy-id" aria-label="Скопировать ID">${svg("copy", "s")}</button></div>
+        <div class="field"><span class="row-main"><div class="field-label">Ключ доступа</div><div class="field-value" ${S.has_key && s.active ? 'style="color:var(--ok)"' : ""}>${keyState}</div></span>
+          ${s.active && S.has_key ? `<button class="icon-btn" data-act="reset-key" aria-label="Перевыпустить ключ">${svg("refresh", "s")}</button>` : s.active ? `<button class="icon-btn" data-go="connect" aria-label="Получить ключ">${svg("key", "s")}</button>` : ""}</div>
+        <div class="acc-actions">
+          ${s.active ? "" : `<button class="btn main" data-go="plans">Оформить подписку</button>`}
+          <div class="two"><button class="btn soft" data-act="support">${svg("chat", "s")}Поддержка</button><button class="btn soft" data-go="friends">+${days(S.referral.bonus_days)} за друга</button></div>
+        </div>
       </div>
       <div class="cap">Ещё</div>
       <div class="box">
-        ${row("users", "Пригласить друга", { go: "friends", val: `+${days(S.referral.bonus_days)}` })}
         ${row("gift", "Творог в подарок", { act: "gift", val: cheese })}
-        ${row("chat", "Поддержка", { act: "support" })}
         ${row("bot", "Чат с ботом", { link: S.bot_url })}
       </div>
+      <p class="foot">Перевыпуск ключа отключает старый ключ — пригодится, если он попал к посторонним.</p>
       <p class="foot" style="text-align:center;margin-top:20px">${esc(S.brand)}${S.demo ? " · демо-режим: ключи и оплата картой демонстрационные" : ""}</p>`;
+  }
+
+  async function resetKey(btn) {
+    const run = () => busy(btn, async () => {
+      ui.key = await api("/api/key/reset"); S.has_key = true; haptic("success");
+      toast("Ключ перевыпущен — добавьте новый в приложение"); connect(); profile(); go("connect");
+    });
+    if (tg && tg.showConfirm) tg.showConfirm("Перевыпустить ключ? Старый перестанет работать на всех устройствах.", (ok) => ok && run());
+    else if (confirm("Перевыпустить ключ? Старый перестанет работать на всех устройствах.")) run();
   }
 
   // ── Шторка: творог ──
@@ -595,6 +637,8 @@ body.sheet-open .sheet { transform: none; }
       case "copy": return copy(ui.key.config, "Ключ скопирован");
       case "send": return busy(el, async () => { await api("/api/key/send"); haptic("success"); toast("Ключ отправлен в чат"); });
       case "copy-link": return copy(S.referral.link, "Ссылка скопирована");
+      case "copy-id": return copy(String(me.id || ""), "ID скопирован");
+      case "reset-key": return resetKey(el);
       case "share": haptic("medium"); return open(S.referral.share_url);
       case "gift": return gift().catch((x) => toast(x.message));
       case "support": haptic("light"); return open(S.support_url);

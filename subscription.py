@@ -15,7 +15,9 @@ from database import (
     get_user, update_user, activate_subscription, add_payment, get_used_wg_ips,
     set_referrer, get_referral_stats,
 )
-from vpn_manager import generate_wg_keys, get_next_ip, add_peer, create_client_config
+from vpn_manager import (
+    generate_wg_keys, get_next_ip, add_peer, remove_peer, create_client_config, WireGuardError
+)
 
 
 def trial_available(user) -> bool:
@@ -123,6 +125,19 @@ def ensure_vpn_peer(user_id: int):
     user = get_user(user_id)
     add_peer(user["wg_public_key"], user["wg_ip"])
     return user
+
+
+def reset_client_key(user_id: int) -> str:
+    """Перевыпустить ключ: старый отключается от сервера, IP остаётся прежним. Возвращает новый конфиг."""
+    user = get_user(user_id)
+    if user["wg_public_key"]:
+        try:
+            remove_peer(user["wg_public_key"])
+        except WireGuardError:
+            pass  # пира могло уже не быть на сервере
+    private_key, public_key = generate_wg_keys()
+    update_user(user_id, wg_private_key=private_key, wg_public_key=public_key)
+    return build_client_config(user_id)
 
 
 def build_client_config(user_id: int) -> str:
