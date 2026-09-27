@@ -373,7 +373,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"📱 СБП или 💳 Карта · <b>{tariff['price']} ₽</b>"
                 )
                 if DEMO_MODE:
-                    payment_text += "\n\n<i>🧪 Демо-режим: деньги не списываются, просто нажмите «Проверить оплату».</i>"
+                    payment_text += "\n\n<i>🧪 Демо-режим: деньги не списываются.</i>"
+
+                if DEMO_MODE:
+                    # Демо: оплата «проходит» сразу по нажатию кнопки
+                    keyboard = [[InlineKeyboardButton(
+                        f"📱 СБП или 💳 Карта · {tariff['price']} ₽",
+                        callback_data=f"check_payment_{tariff_key}"
+                    )]]
+                    await context.bot.send_message(chat_id, payment_text, parse_mode='HTML',
+                                                   reply_markup=InlineKeyboardMarkup(keyboard))
+                    return
 
                 # Кнопки оплаты
                 keyboard = [
