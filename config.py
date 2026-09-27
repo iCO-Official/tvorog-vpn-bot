@@ -1,24 +1,32 @@
 """
 Конфигурация Творог VPN Bot
-Читает настройки из переменных окружения
+Читает настройки из переменных окружения (файл .env рядом с bot.py)
 """
 import os
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+except ImportError:
+    pass
 
 # Название бота
 BOT_NAME = "Творог VPN"
 BOT_USERNAME = "tvorog_vpn_bot"
 
-# Telegram Bot Token
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8782090577:AAEFp08ZPvh9QDDeESi6EsmljEs2Bh2Qqq8")
+# Telegram Bot Token (получить у @BotFather). Никогда не храните токен в коде!
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
 
-# ID администратора
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))
+# ID администратора (узнать свой ID: @userinfobot)
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "0") or 0)
 
 # WireGuard настройки
-WG_INTERFACE = "wg0"
-WG_PORT = 51820
-WG_DNS = "1.1.1.1, 8.8.8.8"
+WG_INTERFACE = os.environ.get("WG_INTERFACE", "wg0")
+WG_PORT = int(os.environ.get("WG_PORT", "51820"))
+WG_DNS = os.environ.get("WG_DNS", "1.1.1.1, 8.8.8.8")
 WG_SERVER_IP = os.environ.get("WG_SERVER_IP", "YOUR_SERVER_IP")
+# Публичный ключ сервера WireGuard. Если пусто — берётся из `wg show` или /etc/wireguard/server_public.key
+WG_SERVER_PUBLIC_KEY = os.environ.get("WG_SERVER_PUBLIC_KEY", "").strip()
 
 # Тарифы (в рублях)
 TARIFFS = {
@@ -49,8 +57,8 @@ TARIFFS = {
 }
 
 # ЮKassa настройки
-YOOKASSA_SHOP_ID = os.environ.get("YOOKASSA_SHOP_ID", "1412568")
-YOOKASSA_SECRET_KEY = os.environ.get("YOOKASSA_SECRET_KEY", "live_vpeOwoU9atdXO_CyOv0ZzW6weVD2_iJ7nbdbTp1e2LQ")
+YOOKASSA_SHOP_ID = os.environ.get("YOOKASSA_SHOP_ID", "").strip()
+YOOKASSA_SECRET_KEY = os.environ.get("YOOKASSA_SECRET_KEY", "").strip()
 PAYMENT_METHODS = ["bank_card", "sbp", "sberpay"]
 
 # Серверы
@@ -58,7 +66,7 @@ SERVERS = {
     "main": {
         "name": "Основной",
         "ip": WG_SERVER_IP,
-        "port": 51820,
+        "port": WG_PORT,
         "country": "Россия"
     }
 }
@@ -67,8 +75,8 @@ SERVERS = {
 DATABASE_PATH = os.environ.get("DATABASE_PATH", "tvorog_vpn.db")
 
 # Лимиты
-MAX_DEVICES = 3
-TRIAL_DAYS = 3
+MAX_DEVICES = int(os.environ.get("MAX_DEVICES", "3"))
+TRIAL_DAYS = int(os.environ.get("TRIAL_DAYS", "3"))
 
 # Тексты сообщений
 WELCOME_TEXT = """

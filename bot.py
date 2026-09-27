@@ -1,30 +1,40 @@
+import html
+import io
 import logging
+import os
 import sqlite3
+import sys
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+from telegram.error import Conflict, InvalidToken
 from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
-    PreCheckoutQueryHandler,
     MessageHandler,
+    PicklePersistence,
     filters,
     ContextTypes
 )
 
 from config import (
     BOT_TOKEN, TARIFFS, SERVERS, ADMIN_ID, BOT_NAME,
-    WELCOME_TEXT, HELP_TEXT, TARIFF_TEXT, SUCCESS_PAYMENT_TEXT,
-    CONFIG_INSTRUCTION_TEXT, DATABASE_PATH,
-    INSTALL_IPHONE_TEXT, INSTALL_ANDROID_TEXT, INSTALL_WINDOWS_TEXT, INSTALL_MAC_TEXT
+    WELCOME_TEXT, HELP_TEXT, TARIFF_TEXT, INFO_TEXT,
+    CONFIG_INSTRUCTION_TEXT, DATABASE_PATH, TRIAL_DAYS,
+    INSTALL_IPHONE_TEXT, INSTALL_ANDROID_TEXT, INSTALL_WINDOWS_TEXT, INSTALL_MAC_TEXT,
+    INSTALL_LINUX_TEXT
 )
 from database import (
     init_db, get_user, create_user,
     activate_subscription, is_subscription_active,
     add_payment, get_user_stats, update_user,
-    is_cheese_eligible, get_pending_cheese_orders, update_cheese_order
+    is_cheese_eligible, get_pending_cheese_orders, update_cheese_order,
+    get_used_wg_ips, get_wg_peers
 )
-from vpn_manager import generate_wg_keys, create_client_config, save_client_config
+from vpn_manager import (
+    generate_wg_keys, create_client_config, save_client_config,
+    get_next_ip, add_peer, remove_peer, WireGuardError
+)
 from payments import (
     create_payment_link, check_payment_status,
     get_tariff_info, format_subscription_status,
@@ -44,7 +54,90 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+
+# Как часто проверять истёкшие подписки и отключать их от VPN (секунды)
+EXPIRED_PEERS_CHECK_INTERVAL = 3600
+
+
+async def notify_admin(context: ContextTypes.DEFAULT_TYPE, text: str):
+    """Отправить сообщение админу, не ломая сценарий пользователя при ошибке"""
+    if not ADMIN_ID:
+        logger.warning("ADMIN_ID не задан, уведомление админу не отправлено: %s", text)
+        return
+    try:
+        await context.bot.send_message(chat_id=ADMIN_ID, text=text, parse_mode='HTML')
+    except Exception as e:
+        logger.error("Не удалось отправить сообщение админу %s: %s", ADMIN_ID, e)
+
+
+def trial_available(user) -> bool:
+    """Пробный период доступен только тем, у кого ещё никогда не было подписки"""
+    return not user or not user["expires_at"]
+
+
+def ensure_vpn_peer(user_id: int):
+    """Выдать пользователю ключи и IP, добавить его на сервер WireGuard. Возвращает (user, ip)."""
+    user = get_user(user_id)
+    if not user["wg_private_key"]:
+        private_key, public_key = generate_wg_keys()
+        update_user(user_id, wg_private_key=private_key, wg_public_key=public_key)
+    if not user["wg_ip"]:
+        update_user(user_id, wg_ip=get_next_ip(get_used_wg_ips()))
+    user = get_user(user_id)
+    add_peer(user["wg_public_key"], user["wg_ip"])
+    return user
+
+
+async def send_vpn_key(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int):
+    """Отправить пользователю конфиг WireGuard (файл + QR-код)"""
+    user = get_user(user_id)
+    if not user or not is_subscription_active(user_id):
+        await context.bot.send_message(chat_id,
+            "Нет активной подписки.\n"
+            "Нажмите «Забрать подарок» чтобы получить 3 дня бесплатно или купите подписку через /buy.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Забрать подарок", callback_data="claim_gift")]])
+        )
+        return
+
+    try:
+        user = ensure_vpn_peer(user_id)
+        config = create_client_config(user["wg_private_key"], user["wg_ip"])
+    except WireGuardError as e:
+        logger.error("Ошибка выдачи VPN-ключа для %s: %s", user_id, e)
+        await context.bot.send_message(chat_id,
+            "⚠️ Не удалось создать VPN-ключ. Мы уже знаем о проблеме, попробуйте чуть позже "
+            "или напишите в поддержку @tvorog_support."
+        )
+        await notify_admin(context, f"⚠️ Ошибка выдачи VPN-ключа пользователю {user_id}:\n<code>{html.escape(str(e))}</code>")
+        return
+
+    path = save_client_config(user_id, config)
+    with open(path, "rb") as f:
+        await context.bot.send_document(chat_id,
+            document=InputFile(f, filename="TvorogVPN.conf"),
+            caption="🔑 <b>VPN-ключ готов!</b>\n\nИмпортируйте файл в приложение (WireGuard или Happ).",
+            parse_mode='HTML'
+        )
+
+    try:
+        import qrcode
+        buf = io.BytesIO()
+        qrcode.make(config).save(buf, format="PNG")
+        buf.seek(0)
+        await context.bot.send_photo(chat_id, photo=buf,
+            caption="📷 Или отсканируйте QR-код в приложении WireGuard на телефоне."
+        )
+    except Exception as e:
+        logger.warning("Не удалось отправить QR-код: %s", e)
+
+    keyboard = [[InlineKeyboardButton("📖 Инструкция", callback_data="instruction")],
+                [InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_menu")]]
+    await context.bot.send_message(chat_id,
+        "✅ Готово! Если что-то не получается — нажмите «Инструкция».",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 # Главное меню клавиатура
 def get_main_menu_keyboard():
@@ -71,7 +164,7 @@ def get_device_keyboard():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     user = update.effective_user
-    db_user = create_user(user.id, user.username or user.first_name)
+    create_user(user.id, user.username or user.first_name)
 
     keyboard = [
         [InlineKeyboardButton("🎁 Забрать подарок", callback_data="claim_gift")]
@@ -168,7 +261,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка текстовых сообщений"""
     # Если пользователь вводит город вручную
     if context.user_data.get("waiting_for_city"):
-        city_name = update.message.text
+        city_name = html.escape(update.message.text)
         context.user_data["waiting_for_city"] = False
 
         # Показываем сообщение что город принят
@@ -187,10 +280,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         address = update.message.text
         update_user(user_id, delivery_address=address, cheese_order_status="pending")
+        address = html.escape(address)
         context.user_data["waiting_for_address"] = False
 
         user = get_user(user_id)
-        username = user["username"] or "Без username"
+        username = html.escape(user["username"] or "Без username")
 
         # Формируем сообщение для админа
         admin_text = (
@@ -202,11 +296,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"После заказа: /set_cheese {user_id} ordered"
         )
 
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=admin_text,
-            parse_mode='HTML'
-        )
+        await notify_admin(context, admin_text)
 
         # Ответ пользователю
         await update.message.reply_text(
@@ -243,11 +333,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tariff_key = data.replace("buy_", "")
         if tariff_key == "trial":
             user_id = query.from_user.id
-            activate_subscription(user_id, 3)
-            keyboard = [[InlineKeyboardButton("📥 Получить конфиг", callback_data=f"get_config_{user_id}")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
+            create_user(user_id, query.from_user.username or query.from_user.first_name)
+            if not trial_available(get_user(user_id)):
+                await context.bot.send_message(chat_id,
+                    "Пробный период уже был использован. Выберите тариф через /buy 🙂"
+                )
+                return
+            activate_subscription(user_id, TRIAL_DAYS)
+            add_payment(user_id, 0, "trial", "trial")
+            reply_markup = InlineKeyboardMarkup(get_device_keyboard())
             await context.bot.send_message(chat_id,
-                "✅ <b>Пробный период активирован!</b>\n\n3 дня бесплатно. Нажми /status чтобы проверить.",
+                f"✅ <b>Пробный период активирован!</b>\n\n{TRIAL_DAYS} дня бесплатно. Выберите устройство:",
                 parse_mode='HTML', reply_markup=reply_markup
             )
         elif tariff_key in TARIFFS:
@@ -255,7 +351,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             tariff = TARIFFS[tariff_key]
 
             # Создаём платёжную ссылку
-            payment = create_payment_link(tariff_key, user_id)
+            payment = await create_payment_link(tariff_key, user_id)
 
             if payment:
                 # Сохраняем ID платежа в context
@@ -312,25 +408,30 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # === ПРОВЕРКА ОПЛАТЫ ===
     elif data.startswith("check_payment_"):
-        tariff_key = data.replace("check_payment_", "")
         user_id = query.from_user.id
         pending = context.user_data.get("pending_payment")
 
         if pending and pending.get("payment_id"):
-            payment_status = check_payment_status(pending["payment_id"])
+            # Тариф берём из созданного платежа, а не из кнопки — её можно подделать
+            tariff_key = pending["tariff"]
+            payment_status = await check_payment_status(pending["payment_id"])
+            metadata = payment_status.get("metadata", {})
 
-            if payment_status["paid"]:
+            if payment_status["paid"] and metadata.get("user_id") not in (None, str(user_id)):
+                logger.warning("Платёж %s принадлежит другому пользователю", pending["payment_id"])
+                context.user_data.pop("pending_payment", None)
+                await context.bot.send_message(chat_id, "❌ Платёж не найден. Начни заново через /buy")
+            elif payment_status["paid"]:
                 # Оплата прошла!
                 activate_subscription(user_id, TARIFFS[tariff_key]["days"])
                 add_payment(user_id, TARIFFS[tariff_key]["price"], tariff_key, pending["payment_id"])
 
-                keyboard = [[InlineKeyboardButton("📥 Получить конфиг", callback_data=f"get_config_{user_id}")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
+                reply_markup = InlineKeyboardMarkup(get_device_keyboard())
 
                 await context.bot.send_message(chat_id,
                     "✅ <b>Оплата прошла успешно!</b>\n\n"
                     "Твоя подписка активирована!\n\n"
-                    "Нажми кнопку, чтобы скачать конфиг:",
+                    "Выбери устройство, чтобы получить VPN-ключ:",
                     parse_mode='HTML', reply_markup=reply_markup
                 )
 
@@ -339,7 +440,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await context.bot.send_message(chat_id,
                         "🔒 <b>Поздравляю! Ты получаешь творог!</b>\n\n"
                         "Нажми кнопку ниже и выбери город:",
-                        parse_mode='HTML'
+                        parse_mode='HTML',
+                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎁 Получить творог", callback_data="gift")]])
                     )
 
                 context.user_data.pop("pending_payment", None)
@@ -450,31 +552,39 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # === ЗАБРАТЬ ПОДАРОК (3 дня бесплатно) ===
     elif data == "claim_gift":
         user_id = query.from_user.id
+        create_user(user_id, query.from_user.username or query.from_user.first_name)
         user = get_user(user_id)
 
-        # Проверяем, брал ли уже пробный период
-        if user and user["expires_at"]:
-            from datetime import datetime
-            expires = datetime.fromisoformat(user["expires_at"])
-            if expires > datetime.now():
-                # Уже есть активная подписка
-                keyboard = [[InlineKeyboardButton("📱 Выбрать устройство", callback_data="select_device")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                await context.bot.send_message(chat_id,
-                    "🎉 У вас уже есть активная подписка!\n\n"
-                    "📱 Выберите устройство для установки:",
-                    reply_markup=reply_markup
-                )
-                return
+        if is_subscription_active(user_id):
+            # Уже есть активная подписка
+            keyboard = [[InlineKeyboardButton("📱 Выбрать устройство", callback_data="select_device")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await context.bot.send_message(chat_id,
+                "🎉 У вас уже есть активная подписка!\n\n"
+                "📱 Выберите устройство для установки:",
+                reply_markup=reply_markup
+            )
+            return
+
+        # Пробный период — только один раз
+        if not trial_available(user):
+            keyboard = [[InlineKeyboardButton("💳 Купить подписку", callback_data="buy")]]
+            await context.bot.send_message(chat_id,
+                "Пробный период уже был использован, а подписка закончилась.\n\n"
+                "Продлите подписку, чтобы продолжить пользоваться VPN:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
 
         # Активируем пробный период
-        activate_subscription(user_id, 3)
+        activate_subscription(user_id, TRIAL_DAYS)
+        add_payment(user_id, 0, "trial", "trial")
 
         keyboard = [[InlineKeyboardButton("📱 Выбрать устройство", callback_data="select_device")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await context.bot.send_message(chat_id,
-            "🎉 Пробный период на 3 дня активирован!\n\n"
+            f"🎉 Пробный период на {TRIAL_DAYS} дня активирован!\n\n"
             "📱 Теперь выберите ваше устройство, чтобы получить VPN-ключ:",
             reply_markup=reply_markup
         )
@@ -533,45 +643,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id, INSTALL_LINUX_TEXT, parse_mode='HTML', reply_markup=reply_markup)
 
     # === ПОЛУЧИТЬ VPN-КЛЮЧ (для всех устройств) ===
-    elif data.startswith("get_config_iphone") or data.startswith("get_config_android") or data.startswith("get_config_windows") or data.startswith("get_config_mac") or data.startswith("get_config_linux"):
-        user_id = query.from_user.id
-        user = get_user(user_id)
-
-        if user and is_subscription_active(user_id):
-            # Генерируем ключи если нет
-            if not user["wg_private_key"]:
-                private_key, public_key = generate_wg_keys()
-                update_user(user_id, wg_private_key=private_key, wg_public_key=public_key)
-                user = get_user(user_id)
-
-            # Создаём конфиг
-            config, client_ip = create_client_config(user_id, user["wg_private_key"], user["wg_public_key"])
-            save_client_config(user_id, config)
-
-            # Отправляем конфиг
-            with open(f"configs/{user_id}.conf", "rb") as f:
-                await context.bot.send_document(chat_id,
-                    document=InputFile(f),
-                    caption="VPN-ключ готов!\n\nИмпортируйте в Happ",
-                    parse_mode='HTML'
-                )
-
-            # Кнопка добавления в Happ
-            keyboard = [
-                [InlineKeyboardButton("Добавить в Happ", url="https://happ://import")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await context.bot.send_message(chat_id,
-                "Нажмите кнопку ниже, чтобы добавить подписку в Happ.\n"
-                "Или скопируйте ссылку выше и вставьте вручную.",
-                reply_markup=reply_markup
-            )
-        else:
-            await context.bot.send_message(chat_id,
-                "Нет активной подписки.\n"
-                "Нажмите «Забрать подарок» чтобы получить 3 дня бесплатно.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Забрать подарок", callback_data="claim_gift")]])
-            )
+    # get_config_iphone / get_config_android / ... и старые кнопки get_config_<id>.
+    # Ключ всегда выдаётся только тому, кто нажал кнопку.
+    elif data.startswith("get_config_"):
+        await send_vpn_key(context, chat_id, query.from_user.id)
 
     # === ПОЛУЧИТЬ ТВОРОГ ===
     elif data == "gift":
@@ -616,27 +691,27 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # === ВЫБОР ПУНКТА ВЫДАЧИ ===
     elif data.startswith("pvz_"):
-        parts = data.split("_")
-        city_id = parts[1]
-        pvz_id = parts[2]
+        # city_id может содержать "_" (nizhny_novgorod), поэтому режем справа
+        city_id, pvz_id = data[len("pvz_"):].rsplit("_", 1)
 
         user_id = query.from_user.id
+        if not is_cheese_eligible(user_id):
+            await context.bot.send_message(chat_id, "🔒 Творог доступен только при покупке подписки от 1 месяца.")
+            return
+
         user = get_user(user_id)
-        username = user["username"] or "Без username"
+        username = html.escape(user["username"] or "Без username")
 
-        # Формируем сообщение для админа
-        admin_text = format_order_message(username, user_id, city_id, pvz_id)
-
-        # Отправляем админу
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=admin_text,
-            parse_mode='HTML'
-        )
-
-        # Сохраняем данные
         city_name = get_city_name(city_id)
         pvz = get_pvz_by_id(city_id, pvz_id)
+        if not pvz:
+            await context.bot.send_message(chat_id, "❌ Пункт выдачи не найден, выберите ещё раз.")
+            return
+
+        # Отправляем админу
+        await notify_admin(context, format_order_message(username, user_id, city_id, pvz_id))
+
+        # Сохраняем данные
 
         update_user(user_id,
             delivery_address=f"{city_name}, {pvz['address']}",
@@ -671,65 +746,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='HTML', reply_markup=reply_markup
         )
 
-    # === ПОЛУЧИТЬ КОНФИГ ===
-    elif data.startswith("get_config_"):
-        user_id = int(data.replace("get_config_", ""))
-        user = get_user(user_id)
-
-        if user and is_subscription_active(user_id):
-            if not user["wg_private_key"]:
-                private_key, public_key = generate_wg_keys()
-                update_user(user_id, wg_private_key=private_key, wg_public_key=public_key)
-                user = get_user(user_id)
-
-            config, client_ip = create_client_config(user_id, user["wg_private_key"], user["wg_public_key"])
-            save_client_config(user_id, config)
-
-            with open(f"configs/{user_id}.conf", "rb") as f:
-                await context.bot.send_document(chat_id,
-                    document=InputFile(f),
-                    caption="🔒 <b>Конфиг Творог VPN</b>\n\nИмпортируй в Happ или MantaRay",
-                    parse_mode='HTML'
-                )
-
-            keyboard = [[InlineKeyboardButton("📖 Инструкция", callback_data="instruction")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await context.bot.send_message(chat_id,
-                "✅ Конфиг скачан!\n\nНажми для инструкции:",
-                reply_markup=reply_markup
-            )
-        else:
-            await context.bot.send_message(chat_id, "❌ Нет активной подписки. Купи через /buy")
-
     # === ИНСТРУКЦИЯ ===
     elif data == "instruction":
         await context.bot.send_message(chat_id, CONFIG_INSTRUCTION_TEXT, parse_mode='HTML')
-
-# Обработка успешной оплаты
-async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка успешной оплаты"""
-    payment_info = await successful_payment_callback(update, context)
-
-    if payment_info:
-        user_id = payment_info["user_id"]
-        tariff_key = payment_info["tariff"]
-        days = TARIFFS[tariff_key]["days"]
-        activate_subscription(user_id, days)
-        add_payment(user_id, payment_info["amount"], tariff_key, payment_info["payment_id"])
-
-        await update.message.reply_text(SUCCESS_PAYMENT_TEXT, parse_mode='HTML')
-
-        keyboard = [[InlineKeyboardButton("📥 Получить конфиг VPN", callback_data=f"get_config_{user_id}")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("Нажми кнопку, чтобы скачать конфиг:", reply_markup=reply_markup)
-
-        # Творог в подарок при подписке от 1 месяца
-        if tariff_key in ["month", "quarter", "year"]:
-            await update.message.reply_text(
-                "🔒 <b>Поздравляю! Ты получаешь творог!</b>\n\n"
-                "Напиши /gift и укажи адрес доставки! 🎁",
-                parse_mode='HTML'
-            )
 
 # Команда /admin
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -894,10 +913,55 @@ async def order_cheese(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except (IndexError, ValueError):
         await update.message.reply_text("Использование: /order_cheese USER_ID")
 
+async def sync_wg_peers(context: ContextTypes.DEFAULT_TYPE):
+    """Отключить истёкшие подписки от VPN"""
+    for peer in get_wg_peers(active=False):
+        try:
+            remove_peer(peer["public_key"])
+        except WireGuardError as e:
+            logger.warning("Не удалось отключить пир %s: %s", peer["user_id"], e)
+
+
+async def post_init(application: Application):
+    """После старта: вернуть активных пользователей в WireGuard (после перезагрузки сервера пиры теряются)"""
+    restored = 0
+    for peer in get_wg_peers(active=True):
+        try:
+            add_peer(peer["public_key"], peer["ip"])
+            restored += 1
+        except WireGuardError as e:
+            logger.error("Не удалось восстановить пир %s: %s", peer["user_id"], e)
+            break
+    logger.info("Восстановлено VPN-подключений: %s", restored)
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Логировать все ошибки, чтобы бот не падал молча"""
+    if isinstance(context.error, Conflict):
+        logger.error(
+            "Конфликт: этот же токен используется другой копией бота. "
+            "Остановите старую копию или перевыпустите токен в @BotFather."
+        )
+        return
+    logger.error("Ошибка при обработке обновления %s", update, exc_info=context.error)
+
+
 def main():
     """Запуск бота"""
+    if not BOT_TOKEN:
+        sys.exit("❌ BOT_TOKEN не задан. Впишите токен от @BotFather в файл .env (BOT_TOKEN=...)")
+    if not ADMIN_ID:
+        logger.warning("ADMIN_ID не задан — админ-команды и уведомления о заказах работать не будут")
+
     init_db()
-    application = Application.builder().token(BOT_TOKEN).build()
+    persistence = PicklePersistence(filepath=os.environ.get("PERSISTENCE_PATH", "bot_state.pickle"))
+    application = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .persistence(persistence)
+        .post_init(post_init)
+        .build()
+    )
 
     # Команды
     application.add_handler(CommandHandler("start", start))
@@ -919,18 +983,28 @@ def main():
     # Текст (для адреса)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    print(f"🔒 {BOT_NAME} запущен!")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    application.add_error_handler(error_handler)
+
+    if application.job_queue:
+        application.job_queue.run_repeating(sync_wg_peers, interval=EXPIRED_PEERS_CHECK_INTERVAL, first=60)
+    else:
+        logger.warning("JobQueue недоступен: установите python-telegram-bot[job-queue]")
+
+    logger.info("🔒 %s запускается...", BOT_NAME)
+    try:
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
+    except InvalidToken:
+        sys.exit("❌ Telegram отклонил токен. Проверьте BOT_TOKEN в .env или перевыпустите его в @BotFather")
 
 def run_api_server():
     """Запуск API сервера для админ-панели"""
     from api import run_server
     import threading
-    thread = threading.Thread(target=run_server, args=(8080,), daemon=True)
+    port = int(os.environ.get("API_PORT", "8080"))
+    thread = threading.Thread(target=run_server, args=(port,), daemon=True)
     thread.start()
 
 if __name__ == '__main__':
-    import os
     # Запускаем API сервер если включено
     if os.environ.get("ENABLE_API", "false").lower() == "true":
         run_api_server()

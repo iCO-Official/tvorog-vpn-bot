@@ -20,9 +20,16 @@ def init_db():
             last_active TEXT,
             delivery_address TEXT,
             cheese_order_status TEXT DEFAULT 'none',
-            cheese_order_date TEXT
+            cheese_order_date TEXT,
+            wg_ip TEXT
         )
     ''')
+
+    # Миграция старых баз: добавляем недостающие колонки
+    cursor.execute("PRAGMA table_info(users)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "wg_ip" not in columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN wg_ip TEXT")
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS payments (
@@ -42,6 +49,7 @@ def init_db():
 def get_user(user_id: int) -> dict:
     """Получить пользователя по ID"""
     conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
@@ -49,20 +57,7 @@ def get_user(user_id: int) -> dict:
     conn.close()
 
     if row:
-        return {
-            "user_id": row[0],
-            "username": row[1],
-            "expires_at": row[2],
-            "wg_private_key": row[3],
-            "wg_public_key": row[4],
-            "server_id": row[5],
-            "is_active": row[6],
-            "created_at": row[7],
-            "last_active": row[8],
-            "delivery_address": row[9],
-            "cheese_order_status": row[10],
-            "cheese_order_date": row[11]
-        }
+        return dict(row)
     return None
 
 def create_user(user_id: int, username: str) -> dict:
@@ -289,3 +284,29 @@ def update_cheese_order(user_id: int, status: str):
         cheese_order_status=status,
         cheese_order_date=datetime.now().isoformat() if status == "ordered" else None
     )
+
+
+def get_used_wg_ips() -> set:
+    """IP-адреса WireGuard, уже закреплённые за пользователями"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT wg_ip FROM users WHERE wg_ip IS NOT NULL")
+    ips = {row[0] for row in cursor.fetchall()}
+    conn.close()
+    return ips
+
+
+def get_wg_peers(active: bool) -> list:
+    """Пиры WireGuard активных (active=True) или истёкших (active=False) подписок"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    now = datetime.now().isoformat()
+    condition = "expires_at > ?" if active else "(expires_at IS NULL OR expires_at <= ?)"
+    cursor.execute(
+        f"SELECT user_id, wg_public_key, wg_ip FROM users "
+        f"WHERE wg_public_key IS NOT NULL AND wg_ip IS NOT NULL AND {condition}",
+        (now,)
+    )
+    peers = [{"user_id": r[0], "public_key": r[1], "ip": r[2]} for r in cursor.fetchall()]
+    conn.close()
+    return peers

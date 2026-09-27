@@ -1,37 +1,19 @@
-version: '3.8'
-
+# Бот в Docker. WireGuard (wg0) должен работать на самом сервере
+# (его настраивает setup_server.sh) — бот управляет им через network_mode: host.
 services:
   tvorog-vpn-bot:
     build: .
     container_name: tvorog-vpn-bot
     restart: unless-stopped
-    volumes:
-      - ./config.py:/app/config.py
-      - ./tvorog_vpn.db:/app/tvorog_vpn.db
-      - ./configs:/app/configs
+    env_file: .env
     environment:
       - TZ=Europe/Moscow
+      - DATABASE_PATH=/app/data/tvorog_vpn.db
+      - PERSISTENCE_PATH=/app/data/bot_state.pickle
+    volumes:
+      - ./data:/app/data
+      - ./configs:/app/configs
+      - /etc/wireguard:/etc/wireguard:ro
     network_mode: host
     cap_add:
       - NET_ADMIN
-    devices:
-      - /dev/net/tun:/dev/net/tun
-
-  wireguard:
-    image: linuxserver/wireguard
-    container_name: wireguard
-    restart: unless-stopped
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Europe/Moscow
-      - SERVERURL=your_server_ip
-      - SERVERPORT=51820
-      - PEERS=100
-    volumes:
-      - ./wireguard-config:/config
-    ports:
-      - 51820:51820/udp

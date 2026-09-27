@@ -37,3 +37,7 @@ Thumbs.db
 
 # Backups
 backups/
+# Секреты и состояние бота
+.env
+bot_state.pickle
+data/

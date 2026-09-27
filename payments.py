@@ -1,13 +1,18 @@
 """
 Модуль оплаты через ЮKassa
 """
+import logging
 import uuid
 import httpx
 from datetime import datetime
 from config import TARIFFS, YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY, PAYMENT_METHODS
 
+logger = logging.getLogger(__name__)
 
-def create_payment_link(tariff_key: str, user_id: int) -> dict:
+YOOKASSA_TIMEOUT = 20
+
+
+async def create_payment_link(tariff_key: str, user_id: int) -> dict:
     """
     Создать платёжную ссылку через ЮKassa
 
@@ -17,6 +22,10 @@ def create_payment_link(tariff_key: str, user_id: int) -> dict:
     tariff = TARIFFS[tariff_key]
 
     if tariff["price"] == 0:
+        return None
+
+    if not YOOKASSA_SHOP_ID or not YOOKASSA_SECRET_KEY:
+        logger.error("ЮKassa не настроена: заполните YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY в .env")
         return None
 
     # Уникальный ID платежа
@@ -44,12 +53,13 @@ def create_payment_link(tariff_key: str, user_id: int) -> dict:
 
     try:
         # Отправляем запрос
-        response = httpx.post(
-            url,
-            json=payload,
-            auth=(YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY),
-            headers={"Idempotence-Key": payment_id}
-        )
+        async with httpx.AsyncClient(timeout=YOOKASSA_TIMEOUT) as client:
+            response = await client.post(
+                url,
+                json=payload,
+                auth=(YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY),
+                headers={"Idempotence-Key": payment_id}
+            )
 
         if response.status_code == 200:
             data = response.json()
@@ -60,15 +70,15 @@ def create_payment_link(tariff_key: str, user_id: int) -> dict:
                 "tariff": tariff_key
             }
         else:
-            print(f"Ошибка ЮKassa: {response.status_code} - {response.text}")
+            logger.error("Ошибка ЮKassa: %s - %s", response.status_code, response.text)
             return None
 
     except Exception as e:
-        print(f"Ошибка создания платежа: {e}")
+        logger.exception("Ошибка создания платежа: %s", e)
         return None
 
 
-def check_payment_status(payment_id: str) -> dict:
+async def check_payment_status(payment_id: str) -> dict:
     """
     Проверить статус платежа
 
@@ -78,10 +88,11 @@ def check_payment_status(payment_id: str) -> dict:
     url = f"https://api.yookassa.ru/v3/payments/{payment_id}"
 
     try:
-        response = httpx.get(
-            url,
-            auth=(YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY)
-        )
+        async with httpx.AsyncClient(timeout=YOOKASSA_TIMEOUT) as client:
+            response = await client.get(
+                url,
+                auth=(YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY)
+            )
 
         if response.status_code == 200:
             data = response.json()
@@ -92,10 +103,11 @@ def check_payment_status(payment_id: str) -> dict:
                 "metadata": data.get("metadata", {})
             }
         else:
+            logger.error("Ошибка проверки платежа ЮKassa: %s - %s", response.status_code, response.text)
             return {"status": "error", "paid": False}
 
     except Exception as e:
-        print(f"Ошибка проверки платежа: {e}")
+        logger.exception("Ошибка проверки платежа: %s", e)
         return {"status": "error", "paid": False}
 
 

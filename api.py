@@ -1,11 +1,15 @@
 """
 API сервер для админ-панели Творог VPN
 """
+import os
 import sqlite3
 import json
 from datetime import datetime, timedelta
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 from config import DATABASE_PATH
+
+ADMIN_PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "admin.html")
 
 
 def get_db():
@@ -150,48 +154,49 @@ def get_payments():
     return payments
 
 
-class AdminHandler(SimpleHTTPRequestHandler):
-    """Обработчик запросов"""
+class AdminHandler(BaseHTTPRequestHandler):
+    """Обработчик запросов. Отдаёт только API и admin.html — никаких других файлов
+    (раньше отдавалась вся папка бота, включая .env, базу и ключи клиентов)."""
+
+    def _send(self, code, body: bytes, content_type: str):
+        self.send_response(code)
+        self.send_header('Content-type', content_type)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _authorized(self) -> bool:
+        token = os.environ.get("API_TOKEN", "")
+        if not token:
+            return True
+        query = parse_qs(urlparse(self.path).query)
+        header = self.headers.get("Authorization", "")
+        return header == f"Bearer {token}" or query.get("token", [""])[0] == token
 
     def do_GET(self):
-        if self.path == '/api/stats':
-            data = get_stats()
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
+        if not self._authorized():
+            return self._send(401, b"Unauthorized", "text/plain")
 
-        elif self.path == '/api/users':
-            data = get_users()
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
+        path = urlparse(self.path).path
+        routes = {'/api/stats': get_stats, '/api/users': get_users, '/api/payments': get_payments}
+        if path in routes:
+            data = json.dumps(routes[path](), ensure_ascii=False).encode()
+            return self._send(200, data, 'application/json; charset=utf-8')
 
-        elif self.path == '/api/payments':
-            data = get_payments()
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
+        if path in ('/', '/index.html', '/admin.html'):
+            with open(ADMIN_PAGE, 'rb') as f:
+                return self._send(200, f.read(), 'text/html; charset=utf-8')
 
-        elif self.path == '/' or self.path == '/index.html':
-            self.path = '/admin.html'
-            return super().do_GET()
-        else:
-            return super().do_GET()
+        return self._send(404, b"Not found", "text/plain")
 
     def log_message(self, format, *args):
         pass  # Отключаем логи
 
 
 def run_server(port=8080):
-    """Запуск сервера"""
-    server = HTTPServer(('0.0.0.0', port), AdminHandler)
-    print(f"Админ-панель запущена: http://localhost:{port}")
+    """Запуск сервера. По умолчанию слушает только localhost (API_HOST=0.0.0.0 — открыть наружу)"""
+    host = os.environ.get("API_HOST", "127.0.0.1")
+    server = HTTPServer((host, port), AdminHandler)
+    print(f"Админ-панель запущена: http://{host}:{port}")
     server.serve_forever()
 
 

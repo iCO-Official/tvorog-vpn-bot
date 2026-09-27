@@ -1,254 +1,103 @@
-# 🧀 Инструкция по запуску Творог VPN на VPS
+# 🧀 Как запустить Творог VPN на сервере (можно делать с iPhone)
 
-## Шаг 0: Настрой ЮKassa (для оплаты)
+Инструкция рассчитана на то, что у вас есть только iPhone. Займёт ~15 минут.
 
-### 1. Зарегистрируйся в ЮKassa
-- Зайди на **yookassa.ru**
-- Создай аккаунт
-- Выбери "С помощью телеграм-бота"
-- Заполни данные:
-  - Что продаёшь: "VPN-подписки для безопасного интернета"
-  - Ссылка на бота: `@tvorog_vpn_bot`
-  - Сделай скриншоты бота
+## Шаг 0. Что понадобится
 
-### 2. Получи API ключи
-- После одобрения зайди в **Настройки** → **API ключи**
-- Скопируй:
-  - **Shop ID** (ID магазина)
-  - **Secret Key** (секретный ключ)
+1. **VPS-сервер** с Ubuntu 22.04 или 24.04 (от 1 ГБ RAM). Желательно **за пределами РФ** (Нидерланды, Германия, Финляндия и т.п.) — иначе VPN не будет обходить блокировки.
+   От хостинга вам нужны: **IP-адрес** и **пароль root**.
+2. **Новый токен бота.** Старый токен был опубликован на GitHub — его нужно перевыпустить:
+   в Telegram откройте **@BotFather** → `/mybots` → выберите бота → **API Token** → **Revoke current token**. Скопируйте новый токен.
+3. **Ваш Telegram ID** — напишите боту **@userinfobot**, он пришлёт число (например `123456789`).
+4. **Ключи ЮKassa** (если нужна оплата): личный кабинет ЮKassa → **Интеграция → Ключи API**.
+   Старый секретный ключ тоже был опубликован — **выпустите новый**, старый удалите.
 
-### 3. Вставь ключи в конфиг
-Открой `config.py` и замени:
-```python
-YOOKASSA_SHOP_ID = "ТВОЙ_SHOP_ID"
-YOOKASSA_SECRET_KEY = "ТВОЙ_SECRET_KEY"
-```
+## Шаг 1. Подключитесь к серверу с iPhone
 
----
+1. Установите из App Store бесплатное приложение **Termius**.
+2. Нажмите **+** → **New Host**:
+   - **Hostname**: IP вашего сервера
+   - **Username**: `root`
+   - **Password**: пароль от хостинга
+3. Нажмите **Save**, затем нажмите на созданный сервер — откроется чёрный терминал.
 
-## Шаг 1: Купи VPS сервер
+> Совет: команды ниже удобно копировать долгим нажатием и вставлять в Termius (долгое нажатие в терминале → Paste).
 
-### Рекомендую Timeweb (99₽/мес)
+## Шаг 2. Установите бота (одна команда)
 
-1. Зайди на **timeweb.com**
-2. Создай аккаунт
-3. Выбери тариф:
-   - ОС: **Ubuntu 22.04**
-   - RAM: **512 MB**
-   - SSD: **10 GB**
-   - Цена: **99₽/мес**
-4. Оплати
-5. Запиши:
-   - **IP-адрес** (например: 185.123.45.67)
-   - **Пароль root** (пришлёт на почту)
-
----
-
-## Шаг 2: Подключись к серверу
-
-### Через PowerShell (Windows):
-
-```powershell
-ssh root@ТВОЙ_IP_АДРЕС
-```
-
-Введи пароль root.
-
-### Через Putty (если не работает PowerShell):
-
-1. Скачай Putty: putty.org
-2. Введи IP-адрес сервера
-3. Нажми Open
-4. Login: `root`
-5. Password: твой пароль
-
----
-
-## Шаг 3: Установи софт на сервере
-
-Вводи команды по очереди:
+Скопируйте и вставьте целиком, нажмите Enter:
 
 ```bash
-# Обнови систему
-apt update && apt upgrade -y
-
-# Установи Python и WireGuard
-apt install -y python3 python3-pip python3-venv wireguard ufw git
-
-# Создай папку для бота
-mkdir -p /root/tvorog-bot
-cd /root/tvorog-bot
+apt-get update && apt-get install -y git && git clone https://github.com/iCO-Official/tvorog-vpn-bot.git /opt/tvorog-vpn-bot && cd /opt/tvorog-vpn-bot && bash setup_server.sh
 ```
 
----
+Скрипт сам установит WireGuard, Python, файрвол и автозапуск. В конце он спросит:
 
-## Шаг 4: Загрузи файлы бота
+- `Вставьте токен бота от @BotFather:` — вставьте **новый** токен, Enter
+- `Ваш Telegram ID:` — вставьте число от @userinfobot, Enter
+- `ЮKassa shopId` и `секретный ключ` — вставьте или просто нажмите Enter, чтобы пропустить
 
-### Способ 1: Через SCP (с своего ПК)
+В конце должно появиться: **✅ Готово! Бот запущен**. Напишите боту `/start` — он должен ответить.
 
-Открой PowerShell на своём ПК и введи:
+## Шаг 3. Автозапуск
 
-```powershell
-scp C:\Users\iCO\vpn-bot\*.py root@ТВОЙ_IP:/root/tvorog-bot/
-```
-
-### Способ 2: Через nano (на сервере)
+Уже включён скриптом (systemd). Бот сам запускается после перезагрузки сервера и сам перезапускается, если упал. Проверить:
 
 ```bash
-cd /root/tvorog-bot
-
-# Создай bot.py
-nano bot.py
+systemctl status tvorog-vpn-bot
 ```
 
-Нажми `Ctrl+V` чтобы вставить код. Потом `Ctrl+X` → `Y` → `Enter`.
+Зелёное `active (running)` — всё хорошо. Выйти из просмотра — клавиша `q`.
 
-Так же создай файлы: `config.py`, `database.py`, `vpn_manager.py`, `payments.py`, `ozon_helper.py`
+## Шаг 4. Как посмотреть логи
 
----
-
-## Шаг 5: Настрой конфигурацию
+Живые логи (выход — Ctrl+C, в Termius есть кнопка Ctrl над клавиатурой):
 
 ```bash
-nano config.py
+journalctl -u tvorog-vpn-bot -f
 ```
 
-Замени:
-- `BOT_TOKEN` — на свой токен от BotFather
-- `ADMIN_ID` — на свой Telegram ID (узнай у @userinfobot)
-- `WG_SERVER_IP` — на IP твоего сервера
-
----
-
-## Шаг 6: Настрой WireGuard
+Последние 50 строк:
 
 ```bash
-# Генерация ключей
-wg genkey | tee /etc/wireguard/server_private.key | wg pubkey > /etc/wireguard/server_public.key
-
-# Создай конфиг
-cat > /etc/wireguard/wg0.conf << EOF
-[Interface]
-PrivateKey = $(cat /etc/wireguard/server_private.key)
-Address = 10.0.0.1/24
-ListenPort = 51820
-PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
-PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
-EOF
-
-# Открой порты
-ufw allow 22/tcp
-ufw allow 51820/udp
-echo "y" | ufw enable
-
-# Включи forwarding
-echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-sysctl -p
-
-# Запусти WireGuard
-systemctl enable wg-quick@wg0
-systemctl start wg-quick@wg0
+journalctl -u tvorog-vpn-bot -n 50 --no-pager
 ```
 
----
-
-## Шаг 7: Установи зависимости и запусти
+## Как поменять токен или ключи
 
 ```bash
-cd /root/tvorog-bot
-
-# Установи библиотеки
-pip3 install python-telegram-bot aiohttp
-
-# Запусти бота
-python3 bot.py
+nano /opt/tvorog-vpn-bot/.env
 ```
 
-Если всё ок, увидишь: `🧀 Творог VPN запущен!`
-
----
-
-## Шаг 8: Сделай бота работающим 24/7
+Стрелками дойдите до нужной строки, исправьте значение. Сохранить: **Ctrl+O**, Enter; выйти: **Ctrl+X**. Затем перезапустите бота:
 
 ```bash
-# Создай сервис
-cat > /etc/systemd/system/tvorog-bot.service << EOF
-[Unit]
-Description=Tvorog VPN Bot
-After=network.target
-
-[Service]
-User=root
-WorkingDirectory=/root/tvorog-bot
-ExecStart=/usr/bin/python3 bot.py
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Запусти
-systemctl daemon-reload
-systemctl enable tvorog-bot
-systemctl start tvorog-bot
-
-# Проверь статус
-systemctl status tvorog-bot
+systemctl restart tvorog-vpn-bot
 ```
 
----
-
-## Шаг 9: Проверь работу
-
-1. Открой Telegram
-2. Найди бота: `@tvorog_vpn_bot`
-3. Нажми `/start`
-4. Бот должен ответить!
-
----
-
-## Полезные команды на сервере
+## Как обновить бота после исправлений на GitHub
 
 ```bash
-# Статус бота
-systemctl status tvorog-bot
-
-# Перезапуск бота
-systemctl restart tvorog-bot
-
-# Логи бота
-journalctl -u tvorog-bot -f
-
-# Статус WireGuard
-wg show
-
-# Остановка бота
-systemctl stop tvorog-bot
+cd /opt/tvorog-vpn-bot && bash update_bot.sh
 ```
 
----
+## Если бот не отвечает
 
-## Если что-то не работает
+| Что в логах | Что делать |
+|---|---|
+| `BOT_TOKEN не задан` | Впишите токен в `.env` (см. выше) |
+| `Telegram отклонил токен` / `InvalidToken` | Токен неверный или отозван — возьмите новый в @BotFather |
+| `Конфликт: этот же токен используется другой копией бота` | Бот запущен где-то ещё (другой сервер, Railway, компьютер). Остановите ту копию или перевыпустите токен |
+| `Не найден публичный ключ сервера WireGuard` | `systemctl restart wg-quick@wg0`, затем `systemctl restart tvorog-vpn-bot` |
+| `Ошибка ЮKassa: 401` | Неверные ключи ЮKassa в `.env` |
+| `Ошибка ЮKassa: 400 ... receipt` | В ЮKassa включены чеки 54-ФЗ — напишите разработчику, нужно добавить отправку чека |
 
-### Бот не запускается:
+## Запуск через Docker (необязательно, вместо systemd)
+
+Сначала один раз выполните `bash setup_server.sh` (он настроит WireGuard и `.env`), затем:
+
 ```bash
-journalctl -u tvorog-bot -n 50
+systemctl disable --now tvorog-vpn-bot
+docker compose up -d --build
+docker compose logs -f
 ```
-
-### WireGuard не работает:
-```bash
-wg show
-systemctl status wg-quick@wg0
-```
-
-### Порт закрыт:
-```bash
-ufw allow 51820/udp
-ufw reload
-```
-
----
-
-## Готово! 🧀
-
-Теперь твой бот работает 24/7 и принимает заказы!
