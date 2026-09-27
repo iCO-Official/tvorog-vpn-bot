@@ -162,6 +162,20 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show(update, context, text, keyboard)
 
 
+def payment_methods_text() -> str:
+    """Какие способы оплаты сейчас включены — для текста тарифов"""
+    methods = []
+    if card_payments_enabled():
+        methods.append("карта, СБП")
+    if STARS_ENABLED:
+        methods.append("Telegram Stars ⭐")
+    if crypto_payments_enabled():
+        methods.append("криптовалюта")
+    if len(methods) > 1:
+        return ", ".join(methods[:-1]) + " или " + methods[-1]
+    return methods[0] if methods else "временно недоступна"
+
+
 def tariff_discount(key: str) -> int:
     """Скидка тарифа относительно помесячной оплаты, %"""
     month = TARIFFS["month"]
@@ -178,7 +192,7 @@ async def show_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• безлимитный трафик и высокая скорость\n"
         "• поддержка 24/7\n"
         "• 🎁 творог в подарок\n\n"
-        "Оплата: карта, СБП, Telegram Stars или криптовалюта.\n\n"
+        f"Оплата: {payment_methods_text()}.\n\n"
         "Выберите срок подписки:"
     )
     keyboard = []
