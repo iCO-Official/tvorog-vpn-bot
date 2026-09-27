@@ -7,7 +7,7 @@ import sys
 from datetime import datetime
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile,
-    BotCommand, LinkPreviewOptions
+    BotCommand, LabeledPrice, LinkPreviewOptions
 )
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, Conflict, InvalidToken
@@ -17,6 +17,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     Defaults,
     MessageHandler,
+    PreCheckoutQueryHandler,
     PicklePersistence,
     filters,
     ContextTypes
@@ -27,7 +28,7 @@ from config import (
     WELCOME_TEXT, HELP_TEXT, INFO_TEXT,
     CONFIG_INSTRUCTION_TEXT, DATABASE_PATH, TRIAL_DAYS, MAX_DEVICES,
     INSTALL_IPHONE_TEXT, INSTALL_ANDROID_TEXT, INSTALL_WINDOWS_TEXT, INSTALL_MAC_TEXT,
-    INSTALL_LINUX_TEXT, SUPPORT_URL
+    INSTALL_LINUX_TEXT, SUPPORT_URL, STARS_ENABLED, CRYPTO_ASSETS
 )
 from database import (
     init_db, get_user, create_user,
@@ -40,7 +41,10 @@ from vpn_manager import (
     generate_wg_keys, create_client_config, save_client_config,
     get_next_ip, add_peer, remove_peer, WireGuardError
 )
-from payments import create_payment_link, check_payment_status
+from payments import (
+    create_payment_link, check_payment_status, card_payments_enabled,
+    crypto_payments_enabled, create_crypto_invoice, check_crypto_invoice
+)
 from ozon_helper import generate_ozon_link, OZON_PRODUCT_NAME, OZON_PRODUCT_PRICE
 from pvz_finder import (
     get_city_name, get_pvz_list, get_pvz_by_id, format_order_message, POPULAR_CITIES
@@ -174,6 +178,7 @@ async def show_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• безлимитный трафик и высокая скорость\n"
         "• поддержка 24/7\n"
         "• 🎁 творог в подарок\n\n"
+        "Оплата: карта, СБП, Telegram Stars или криптовалюта.\n\n"
         "Выберите срок подписки:"
     )
     keyboard = []
@@ -181,6 +186,8 @@ async def show_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if tariff["price"] == 0:
             continue
         label = f"{tariff['name']} · {tariff['price']} ₽"
+        if STARS_ENABLED and tariff.get("stars"):
+            label += f" / {tariff['stars']} ⭐"
         discount = tariff_discount(key)
         if discount >= 5:
             label += f"  (−{discount}%)"
@@ -310,76 +317,120 @@ async def claim_trial(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def create_invoice(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff_key: str):
-    user_id = update.effective_user.id
-    register(update)
+def order_summary(tariff_key: str) -> str:
     tariff = TARIFFS[tariff_key]
-
-    payment = await create_payment_link(tariff_key, user_id)
-    if not payment:
-        await show(update, context,
-            "<b>⚠️ Не удалось создать счёт</b>\n\n"
-            "Попробуйте через пару минут или напишите в поддержку.",
-            [[url_btn("💬 Поддержка", SUPPORT_URL)], [btn("‹ Назад к тарифам", "buy")]]
-        )
-        return
-
-    context.user_data["pending_payment"] = {"payment_id": payment["payment_id"], "tariff": tariff_key}
-    demo_payment = payment["payment_id"].startswith("demo-")
-
     text = (
         "<b>🧾 Оформление подписки</b>\n\n"
         f"Тариф: <b>{tariff['name']}</b>\n"
         f"Срок: {plural_days(tariff['days'])}\n"
-        f"К оплате: <b>{tariff['price']} ₽</b>\n\n"
-        "Оплата банковской картой или через СБП."
+        f"Стоимость: <b>{tariff['price']} ₽</b>"
     )
+    if STARS_ENABLED and tariff.get("stars"):
+        text += f" или <b>{tariff['stars']} ⭐</b>"
     if tariff_key in CHEESE_TARIFFS:
         text += "\n🎁 После оплаты — творог в подарок."
+    return text
 
-    if demo_payment:
+
+async def show_payment_methods(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff_key: str):
+    register(update)
+    tariff = TARIFFS[tariff_key]
+    keyboard = []
+    if card_payments_enabled():
+        keyboard.append([btn(f"💳 Карта или СБП · {tariff['price']} ₽", f"paycard_{tariff_key}")])
+    if STARS_ENABLED and tariff.get("stars"):
+        keyboard.append([btn(f"⭐ Telegram Stars · {tariff['stars']} ⭐", f"paystars_{tariff_key}")])
+    if crypto_payments_enabled():
+        keyboard.append([btn(f"🪙 Криптовалюта · {tariff['price']} ₽", f"paycrypto_{tariff_key}")])
+    keyboard.append([btn("‹ Назад к тарифам", "buy")])
+
+    text = order_summary(tariff_key) + "\n\nВыберите способ оплаты:"
+    if len(keyboard) == 1:
+        text = order_summary(tariff_key) + "\n\n⚠️ Оплата временно недоступна. Напишите в поддержку."
+        keyboard.insert(0, [url_btn("💬 Поддержка", SUPPORT_URL)])
+    await show(update, context, text, keyboard)
+
+
+async def payment_error(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff_key: str):
+    await show(update, context,
+        "<b>⚠️ Не удалось создать счёт</b>\n\n"
+        "Попробуйте другой способ оплаты или напишите в поддержку.",
+        [[btn("‹ Способы оплаты", f"buy_{tariff_key}")], [url_btn("💬 Поддержка", SUPPORT_URL)]]
+    )
+
+
+async def pay_card(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff_key: str):
+    """Карта / СБП через ЮKassa (в демо-режиме — без списания)"""
+    tariff = TARIFFS[tariff_key]
+    payment = await create_payment_link(tariff_key, update.effective_user.id)
+    if not payment:
+        await payment_error(update, context, tariff_key)
+        return
+
+    context.user_data["pending_payment"] = {
+        "provider": "yookassa", "payment_id": payment["payment_id"], "tariff": tariff_key
+    }
+    text = order_summary(tariff_key) + "\n\n💳 Оплата банковской картой или через СБП."
+    if payment["payment_id"].startswith("demo-"):
         text += "\n\n<i>Демо-режим: деньги не списываются.</i>"
         keyboard = [[btn(f"💳 Оплатить {tariff['price']} ₽", f"check_payment_{tariff_key}")]]
     else:
-        text += "\n\nПосле оплаты вернитесь сюда и нажмите «Я оплатил»."
+        text += "\nПосле оплаты вернитесь сюда и нажмите «Я оплатил»."
         keyboard = [
             [url_btn(f"💳 Оплатить {tariff['price']} ₽", payment["confirmation_url"])],
             [btn("✅ Я оплатил", f"check_payment_{tariff_key}")],
         ]
-    keyboard.append([btn("‹ Назад к тарифам", "buy")])
+    keyboard.append([btn("‹ Способы оплаты", f"buy_{tariff_key}")])
     await show(update, context, text, keyboard)
 
 
-async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_id = query.from_user.id
-    pending = context.user_data.get("pending_payment")
-
-    if not pending or not pending.get("payment_id"):
-        await query.answer("Счёт устарел. Оформите подписку заново.", show_alert=True)
-        await show_tariffs(update, context)
+async def pay_crypto(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff_key: str):
+    """Криптовалюта через @CryptoBot"""
+    tariff = TARIFFS[tariff_key]
+    payment = await create_crypto_invoice(tariff_key, update.effective_user.id)
+    if not payment:
+        await payment_error(update, context, tariff_key)
         return
 
-    # Тариф берём из созданного платежа, а не из кнопки — её можно подделать
-    tariff_key = pending["tariff"]
-    payment_status = await check_payment_status(pending["payment_id"])
-    owner = payment_status.get("metadata", {}).get("user_id")
+    context.user_data["pending_payment"] = {
+        "provider": "crypto", "payment_id": payment["payment_id"], "tariff": tariff_key
+    }
+    await show(update, context,
+        order_summary(tariff_key) + "\n\n"
+        f"🪙 Оплата криптовалютой ({CRYPTO_ASSETS.replace(',', ', ')}) через @CryptoBot "
+        "по текущему курсу. Счёт действует 1 час.\n"
+        "После оплаты вернитесь сюда и нажмите «Я оплатил».",
+        [
+            [url_btn(f"🪙 Оплатить {tariff['price']} ₽ в CryptoBot", payment["confirmation_url"])],
+            [btn("✅ Я оплатил", f"check_payment_{tariff_key}")],
+            [btn("‹ Способы оплаты", f"buy_{tariff_key}")],
+        ]
+    )
 
-    if not payment_status["paid"]:
-        await query.answer("Оплата ещё не поступила. Попробуйте через минуту.", show_alert=True)
-        return
 
-    if owner not in (None, str(user_id)):
-        logger.warning("Платёж %s принадлежит другому пользователю", pending["payment_id"])
-        context.user_data.pop("pending_payment", None)
-        await query.answer("Платёж не найден. Оформите подписку заново.", show_alert=True)
-        return
+async def pay_stars(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff_key: str):
+    """Звёзды Telegram: встроенное окно оплаты"""
+    tariff = TARIFFS[tariff_key]
+    user_id = update.effective_user.id
+    await context.bot.send_invoice(
+        chat_id=update.effective_chat.id,
+        title=f"{BOT_NAME} — {tariff['name']}",
+        description=(
+            f"Подписка на {plural_days(tariff['days'])}: до {MAX_DEVICES} устройств, безлимитный трафик."
+            + (" 🎁 Творог в подарок!" if tariff_key in CHEESE_TARIFFS else "")
+        ),
+        payload=f"stars:{tariff_key}:{user_id}",
+        currency="XTR",
+        prices=[LabeledPrice(tariff["name"], tariff["stars"])],
+    )
 
-    await query.answer("Оплата получена!")
+
+async def complete_payment(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                           user_id: int, tariff_key: str, payment_id: str):
+    """Активировать подписку после оплаты любым способом и показать экран успеха"""
     tariff = TARIFFS[tariff_key]
     activate_subscription(user_id, tariff["days"])
-    add_payment(user_id, tariff["price"], tariff_key, pending["payment_id"])
-    context.user_data.pop("pending_payment", None)
+    add_payment(user_id, tariff["price"], tariff_key, payment_id)
 
     user = get_user(user_id)
     keyboard = [[btn("🔑 Подключить устройство", "connect")]]
@@ -393,6 +444,83 @@ async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard.append([btn("🎁 Получить творог", "gift")])
     keyboard.append(MENU_ROW)
     await show(update, context, text, keyboard)
+
+
+async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Кнопка «Я оплатил» для карты/СБП и криптовалюты"""
+    query = update.callback_query
+    user_id = query.from_user.id
+    pending = context.user_data.get("pending_payment")
+
+    if not pending or not pending.get("payment_id"):
+        await query.answer("Счёт устарел. Оформите подписку заново.", show_alert=True)
+        await show_tariffs(update, context)
+        return
+
+    # Тариф берём из созданного платежа, а не из кнопки — её можно подделать
+    tariff_key = pending["tariff"]
+    if pending.get("provider") == "crypto":
+        payment_status = await check_crypto_invoice(pending["payment_id"])
+    else:
+        payment_status = await check_payment_status(pending["payment_id"])
+    owner = payment_status.get("metadata", {}).get("user_id")
+
+    if not payment_status["paid"]:
+        await query.answer("Оплата ещё не поступила. Попробуйте через минуту.", show_alert=True)
+        return
+
+    if owner not in (None, str(user_id)):
+        logger.warning("Платёж %s принадлежит другому пользователю", pending["payment_id"])
+        context.user_data.pop("pending_payment", None)
+        await query.answer("Платёж не найден. Оформите подписку заново.", show_alert=True)
+        return
+
+    await query.answer("Оплата получена!")
+    context.user_data.pop("pending_payment", None)
+    payment_id = pending["payment_id"]
+    if pending.get("provider") == "crypto":
+        payment_id = f"crypto:{payment_id}"
+    await complete_payment(update, context, user_id, tariff_key, payment_id)
+
+
+async def precheckout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Telegram спрашивает перед списанием звёзд — проверяем счёт"""
+    query = update.pre_checkout_query
+    try:
+        kind, tariff_key, user_id = query.invoice_payload.split(":")
+        valid = (
+            kind == "stars"
+            and tariff_key in TARIFFS
+            and int(user_id) == query.from_user.id
+            and query.currency == "XTR"
+            and query.total_amount == TARIFFS[tariff_key]["stars"]
+        )
+    except ValueError:
+        valid = False
+    if valid:
+        await query.answer(ok=True)
+    else:
+        await query.answer(ok=False, error_message="Счёт устарел. Оформите подписку заново через /buy")
+
+
+async def successful_stars_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    payment = update.message.successful_payment
+    _, tariff_key, _ = payment.invoice_payload.split(":")
+    user_id = update.effective_user.id
+    register(update)
+    logger.info("Оплата звёздами: %s ⭐ от %s за %s", payment.total_amount, user_id, tariff_key)
+    await complete_payment(update, context, user_id, tariff_key,
+                           f"stars:{payment.telegram_payment_charge_id}")
+
+
+async def paysupport(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/paysupport — обязательная для оплаты звёздами команда"""
+    await show(update, context,
+        "<b>💬 Вопросы по оплате</b>\n\n"
+        "Если с оплатой что-то пошло не так или вы хотите вернуть звёзды — напишите в поддержку, "
+        "укажите дату оплаты и тариф. Мы ответим и поможем.",
+        [[url_btn("💬 Написать в поддержку", SUPPORT_URL)], MENU_ROW]
+    )
 
 
 # ───────────────────────── VPN-ключ ─────────────────────────
@@ -644,7 +772,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if tariff_key == "trial":
             await claim_trial(update, context)
         elif tariff_key in TARIFFS:
-            await create_invoice(update, context, tariff_key)
+            await show_payment_methods(update, context, tariff_key)
+    elif data.startswith(("paycard_", "paystars_", "paycrypto_")):
+        method, tariff_key = data.split("_", 1)
+        if tariff_key in TARIFFS and TARIFFS[tariff_key]["price"] > 0:
+            handler = {"paycard": pay_card, "paystars": pay_stars, "paycrypto": pay_crypto}[method]
+            await handler(update, context, tariff_key)
     elif data == "claim_gift":
         await claim_trial(update, context)
     elif data in ("connect", "select_device", "devices"):
@@ -840,6 +973,7 @@ async def post_init(application: Application):
             BotCommand("status", "Личный кабинет"),
             BotCommand("gift", "Творог в подарок"),
             BotCommand("help", "Поддержка"),
+            BotCommand("paysupport", "Вопросы по оплате"),
         ])
     except Exception as e:
         logger.warning("Не удалось установить меню команд: %s", e)
@@ -901,6 +1035,11 @@ def main():
     application.add_handler(CommandHandler("set_cheese", set_cheese))
     application.add_handler(CommandHandler("order_cheese", order_cheese))
     application.add_handler(CommandHandler("users", users_list))
+    application.add_handler(CommandHandler("paysupport", paysupport))
+
+    # Оплата звёздами Telegram
+    application.add_handler(PreCheckoutQueryHandler(precheckout))
+    application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_stars_payment))
 
     # Кнопки
     application.add_handler(CallbackQueryHandler(button_callback))

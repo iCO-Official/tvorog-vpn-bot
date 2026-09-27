@@ -81,6 +81,14 @@ systemctl restart tvorog-vpn-bot
 cd /opt/tvorog-vpn-bot && bash update_bot.sh
 ```
 
+## Способы оплаты
+
+- **Telegram Stars ⭐** — работает сразу, настраивать ничего не нужно. Цены в звёздах — в `config.py` (поле `"stars"` у тарифов). Звёзды копятся на балансе бота; вывести их можно через @BotFather → бот → Monetization (через Fragment, в TON).
+- **Криптовалюта (CryptoBot)** — в Telegram откройте @CryptoBot → **Crypto Pay** → **Create App** → скопируйте **API Token** и впишите в `.env`: `CRYPTO_PAY_TOKEN=...`. Для показа без реальных денег используйте @CryptoTestnetBot и `CRYPTO_PAY_TESTNET=true`.
+- **Карта / СБП (ЮKassa)** — `YOOKASSA_SHOP_ID` и `YOOKASSA_SECRET_KEY` в `.env`.
+
+После изменения `.env`: `systemctl restart tvorog-vpn-bot`.
+
 ## Бот поддержки (необязательно)
 
 1. В @BotFather создайте второго бота: `/newbot`, например `tvorog_support_bot`. Скопируйте токен.

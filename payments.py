@@ -1,15 +1,29 @@
 """
-Модуль оплаты через ЮKassa
+Модуль оплаты: ЮKassa (карты, СБП) и CryptoBot (криптовалюта).
+Оплата звёздами Telegram — в bot.py (встроена в Telegram).
 """
 import logging
 import uuid
 import httpx
 from datetime import datetime
-from config import TARIFFS, YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY, PAYMENT_METHODS, DEMO_MODE
+from config import (
+    TARIFFS, YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY, DEMO_MODE,
+    CRYPTO_PAY_TOKEN, CRYPTO_PAY_TESTNET, CRYPTO_ASSETS, BOT_NAME
+)
 
 logger = logging.getLogger(__name__)
 
 YOOKASSA_TIMEOUT = 20
+CRYPTO_PAY_API = "https://testnet-pay.crypt.bot/api" if CRYPTO_PAY_TESTNET else "https://pay.crypt.bot/api"
+
+
+def card_payments_enabled() -> bool:
+    """Оплата картой/СБП доступна: настроена ЮKassa или демо-режим"""
+    return DEMO_MODE or bool(YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY)
+
+
+def crypto_payments_enabled() -> bool:
+    return bool(CRYPTO_PAY_TOKEN)
 
 
 async def create_payment_link(tariff_key: str, user_id: int) -> dict:
@@ -168,3 +182,59 @@ def format_subscription_status(user) -> str:
         return f"✅ Активна ещё {days} дней (до {expires.strftime('%d.%m.%Y')})"
     else:
         return "❌ Подписка истекла"
+
+
+# ───────────────────────── CryptoBot (Crypto Pay API) ─────────────────────────
+
+async def _crypto_request(method: str, params: dict) -> dict:
+    async with httpx.AsyncClient(timeout=YOOKASSA_TIMEOUT) as client:
+        response = await client.post(
+            f"{CRYPTO_PAY_API}/{method}",
+            json=params,
+            headers={"Crypto-Pay-API-Token": CRYPTO_PAY_TOKEN}
+        )
+    data = response.json()
+    if not data.get("ok"):
+        raise RuntimeError(f"Crypto Pay {method}: {data.get('error')}")
+    return data["result"]
+
+
+async def create_crypto_invoice(tariff_key: str, user_id: int) -> dict:
+    """Счёт в CryptoBot. Сумма — цена тарифа в рублях, клиент платит USDT/TON по курсу."""
+    tariff = TARIFFS[tariff_key]
+    try:
+        result = await _crypto_request("createInvoice", {
+            "currency_type": "fiat",
+            "fiat": "RUB",
+            "amount": str(tariff["price"]),
+            "accepted_assets": CRYPTO_ASSETS,
+            "description": f"{BOT_NAME} — {tariff['name']}",
+            "payload": f"{user_id}:{tariff_key}",
+            "expires_in": 3600,
+        })
+        return {
+            "payment_id": str(result["invoice_id"]),
+            "confirmation_url": result.get("bot_invoice_url") or result.get("pay_url"),
+        }
+    except Exception as e:
+        logger.exception("Ошибка создания счёта CryptoBot: %s", e)
+        return None
+
+
+async def check_crypto_invoice(invoice_id: str) -> dict:
+    """Статус счёта CryptoBot в том же формате, что и check_payment_status"""
+    try:
+        result = await _crypto_request("getInvoices", {"invoice_ids": str(invoice_id)})
+        items = result.get("items", [])
+        if not items:
+            return {"status": "error", "paid": False}
+        invoice = items[0]
+        user_id = (invoice.get("payload") or "").split(":")[0]
+        return {
+            "status": invoice["status"],
+            "paid": invoice["status"] == "paid",
+            "metadata": {"user_id": user_id} if user_id else {},
+        }
+    except Exception as e:
+        logger.exception("Ошибка проверки счёта CryptoBot: %s", e)
+        return {"status": "error", "paid": False}

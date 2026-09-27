@@ -51,18 +51,21 @@ TARIFFS = {
     "month": {
         "name": "1 месяц",
         "price": 299,
+        "stars": 199,
         "days": 30,
         "description": "299 ₽"
     },
     "quarter": {
         "name": "3 месяца",
         "price": 699,
+        "stars": 449,
         "days": 90,
         "description": "699 ₽"
     },
     "year": {
         "name": "1 год",
         "price": 1999,
+        "stars": 1299,
         "days": 365,
         "description": "1999 ₽"
     }
@@ -72,6 +75,16 @@ TARIFFS = {
 YOOKASSA_SHOP_ID = os.environ.get("YOOKASSA_SHOP_ID", "").strip()
 YOOKASSA_SECRET_KEY = os.environ.get("YOOKASSA_SECRET_KEY", "").strip()
 PAYMENT_METHODS = ["bank_card", "sbp", "sberpay"]
+
+# Оплата звёздами Telegram (цены — в поле "stars" у тарифов). Ничего настраивать не нужно.
+STARS_ENABLED = os.environ.get("STARS_ENABLED", "true").lower() == "true"
+
+# Оплата криптовалютой через @CryptoBot (Crypto Pay API): @CryptoBot → Crypto Pay → Create App
+CRYPTO_PAY_TOKEN = os.environ.get("CRYPTO_PAY_TOKEN", "").strip()
+# true — тестовая сеть (@CryptoTestnetBot, тестовые монеты, без реальных денег)
+CRYPTO_PAY_TESTNET = os.environ.get("CRYPTO_PAY_TESTNET", "false").lower() == "true"
+# Какие монеты принимать (сумма считается из цены в рублях по курсу CryptoBot)
+CRYPTO_ASSETS = os.environ.get("CRYPTO_ASSETS", "USDT,TON")
 
 # Серверы
 SERVERS = {
