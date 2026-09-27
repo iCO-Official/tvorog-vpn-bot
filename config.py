@@ -12,7 +12,7 @@ except ImportError:
 
 # Название бота
 BOT_NAME = "Творог VPN"
-BOT_USERNAME = "tvorog_vpn_bot"
+BOT_USERNAME = os.environ.get("BOT_USERNAME", "tvorog_vpn_bot").lstrip("@")
 
 # Telegram Bot Token (получить у @BotFather). Никогда не храните токен в коде!
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
@@ -31,6 +31,14 @@ WG_SERVER_PUBLIC_KEY = os.environ.get("WG_SERVER_PUBLIC_KEY", "").strip()
 # Демо-режим: бот работает без VPN-сервера и без ЮKassa (для показа).
 # VPN-ключи генерируются, но не подключаются; оплата засчитывается без денег.
 DEMO_MODE = os.environ.get("DEMO_MODE", "false").lower() == "true"
+
+# Бот поддержки (отдельный бот от @BotFather)
+SUPPORT_BOT_TOKEN = os.environ.get("SUPPORT_BOT_TOKEN", "").strip()
+# Username бота поддержки (или аккаунта поддержки) — на него ведут кнопки «Поддержка»
+SUPPORT_USERNAME = os.environ.get("SUPPORT_USERNAME", "tvorog_support").lstrip("@")
+SUPPORT_URL = f"https://t.me/{SUPPORT_USERNAME}"
+# Куда приходят обращения: ID админа (по умолчанию) или ID группы операторов
+SUPPORT_CHAT_ID = int(os.environ.get("SUPPORT_CHAT_ID", "0") or 0) or ADMIN_ID
 
 # Тарифы (в рублях)
 TARIFFS = {
@@ -120,7 +128,7 @@ HELP_TEXT = """
 
 Что-то не работает или есть вопрос? Напишите нам — отвечаем 24/7 и поможем подключиться за пару минут.
 
-Поддержка: @tvorog_support
+Поддержка: @{SUPPORT_USERNAME}
 """
 
 TARIFF_TEXT = """
@@ -230,5 +238,9 @@ CONFIG_INSTRUCTION_TEXT = """
 3. Откройте файл в приложении или отсканируйте QR-код
 4. Включите VPN — готово!
 
-Не получается? Напишите в поддержку @tvorog_support — поможем.
+Не получается? Напишите в поддержку @{SUPPORT_USERNAME} — поможем.
 """
+
+# Подставляем username поддержки в тексты
+HELP_TEXT = HELP_TEXT.replace("{SUPPORT_USERNAME}", SUPPORT_USERNAME)
+CONFIG_INSTRUCTION_TEXT = CONFIG_INSTRUCTION_TEXT.replace("{SUPPORT_USERNAME}", SUPPORT_USERNAME)

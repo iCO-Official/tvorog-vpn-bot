@@ -24,6 +24,9 @@ fi
 
 echo "3. Перезапуск бота..."
 sudo systemctl restart tvorog-vpn-bot
+if systemctl is-enabled --quiet tvorog-support-bot 2>/dev/null; then
+    sudo systemctl restart tvorog-support-bot
+fi
 sleep 3
 systemctl --no-pager status tvorog-vpn-bot | head -5
 

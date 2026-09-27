@@ -40,4 +40,5 @@ backups/
 # Секреты и состояние бота
 .env
 bot_state.pickle
+support_state.pickle
 data/

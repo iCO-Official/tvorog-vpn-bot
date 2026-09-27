@@ -96,6 +96,15 @@ systemctl daemon-reload
 systemctl enable $SERVICE_NAME
 systemctl restart $SERVICE_NAME
 
+# Бот поддержки — если в .env указан SUPPORT_BOT_TOKEN
+if grep -q "^SUPPORT_BOT_TOKEN=..*" "$BOT_DIR/.env"; then
+    echo "💬 Настройка бота поддержки..."
+    sed "s|/opt/tvorog-vpn-bot|$BOT_DIR|g" "$BOT_DIR/deploy/tvorog-support-bot.service" > /etc/systemd/system/tvorog-support-bot.service
+    systemctl daemon-reload
+    systemctl enable tvorog-support-bot
+    systemctl restart tvorog-support-bot
+fi
+
 sleep 3
 echo ""
 if systemctl is-active --quiet $SERVICE_NAME; then

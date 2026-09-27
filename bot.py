@@ -27,7 +27,7 @@ from config import (
     WELCOME_TEXT, HELP_TEXT, INFO_TEXT,
     CONFIG_INSTRUCTION_TEXT, DATABASE_PATH, TRIAL_DAYS, MAX_DEVICES,
     INSTALL_IPHONE_TEXT, INSTALL_ANDROID_TEXT, INSTALL_WINDOWS_TEXT, INSTALL_MAC_TEXT,
-    INSTALL_LINUX_TEXT
+    INSTALL_LINUX_TEXT, SUPPORT_URL
 )
 from database import (
     init_db, get_user, create_user,
@@ -57,7 +57,6 @@ logger = logging.getLogger(__name__)
 # Как часто проверять истёкшие подписки и отключать их от VPN (секунды)
 EXPIRED_PEERS_CHECK_INTERVAL = 3600
 
-SUPPORT_URL = "https://t.me/tvorog_support"
 
 DEVICES = {
     "iphone": ("🍎 iPhone / iPad", INSTALL_IPHONE_TEXT),

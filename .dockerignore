@@ -39,5 +39,6 @@ backups/
 report_*.txt
 # Состояние бота и ключи клиентов
 bot_state.pickle
+support_state.pickle
 configs/
 data/
