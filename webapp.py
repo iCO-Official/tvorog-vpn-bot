@@ -18,8 +18,8 @@ from aiohttp import web
 from telegram import InputFile, LabeledPrice
 
 from config import (
-    BOT_TOKEN, BOT_NAME, BOT_USERNAME, TARIFFS, TRIAL_DAYS, MAX_DEVICES, DEMO_MODE,
-    STARS_ENABLED, SUPPORT_URL, ADMIN_ID,
+    BOT_TOKEN, BOT_NAME, TARIFFS, MAX_DEVICES, DEMO_MODE,
+    STARS_ENABLED, SUPPORT_URL, ADMIN_ID, REFERRAL_BONUS_DAYS,
 )
 from database import (
     create_user, get_user, is_subscription_active, is_cheese_eligible, update_user,
@@ -27,8 +27,8 @@ from database import (
 from payments import card_payments_enabled, create_payment_link, check_payment_status
 from pvz_finder import POPULAR_CITIES, get_city_name, get_pvz_list, get_pvz_by_id, format_order_message
 from subscription import (
-    trial_available, start_trial, record_payment, current_period_days,
-    build_client_config, qr_data_url,
+    trial_available, trial_days_for, start_trial, record_payment, current_period_days,
+    build_client_config, qr_data_url, attach_referrer, referral_info,
 )
 from vpn_manager import WireGuardError
 
@@ -66,7 +66,8 @@ DEVICES = [
 # ───────────────────────── Авторизация ─────────────────────────
 
 def validate_init_data(init_data: str, bot_token: str = BOT_TOKEN):
-    """Проверить подпись initData от Telegram. Возвращает данные пользователя или None."""
+    """Проверить подпись initData от Telegram. Возвращает данные пользователя
+    (с полем start_param, если приложение открыто по ссылке) или None."""
     if not init_data:
         return None
     try:
@@ -82,7 +83,9 @@ def validate_init_data(init_data: str, bot_token: str = BOT_TOKEN):
     try:
         if time.time() - int(pairs.get("auth_date", "0")) > INIT_DATA_MAX_AGE:
             return None
-        return json.loads(pairs["user"])
+        user = json.loads(pairs["user"])
+        user["start_param"] = pairs.get("start_param", "")
+        return user
     except (KeyError, ValueError):
         return None
 
@@ -94,7 +97,10 @@ async def auth_middleware(request, handler):
         if not user:
             return web.json_response({"error": "unauthorized"}, status=401)
         request["tg_user"] = user
+        is_new = get_user(user["id"]) is None
         create_user(user["id"], user.get("username") or user.get("first_name"))
+        if is_new and user.get("start_param"):
+            attach_referrer(user["id"], user["start_param"])
     return await handler(request)
 
 
@@ -122,7 +128,7 @@ def tariffs_payload():
     return result
 
 
-def user_state(user_id: int) -> dict:
+def user_state(user_id: int, bot_username: str) -> dict:
     user = get_user(user_id)
     active = is_subscription_active(user_id)
     subscription = {"active": active, "expires": None, "days_left": 0, "period_days": 0, "ever": bool(user["expires_at"])}
@@ -138,7 +144,8 @@ def user_state(user_id: int) -> dict:
         "brand": BOT_NAME,
         "demo": DEMO_MODE,
         "subscription": subscription,
-        "trial": {"available": trial_available(user), "days": TRIAL_DAYS},
+        "trial": {"available": trial_available(user), "days": trial_days_for(user), "invited": bool(user["referrer_id"])},
+        "referral": referral_info(bot_username, user_id),
         "max_devices": MAX_DEVICES,
         "has_key": bool(user["wg_public_key"]),
         "cheese": {"eligible": is_cheese_eligible(user_id), "status": user["cheese_order_status"]},
@@ -146,28 +153,41 @@ def user_state(user_id: int) -> dict:
         "methods": {"stars": STARS_ENABLED, "card": card_payments_enabled(), "card_demo": DEMO_MODE},
         "devices": DEVICES,
         "support_url": SUPPORT_URL,
-        "bot_url": f"https://t.me/{BOT_USERNAME}",
+        "bot_url": f"https://t.me/{bot_username}",
     }
 
 
 # ───────────────────────── Обработчики ─────────────────────────
+
+async def reward_referrer(request, referrer_id):
+    """Уведомить пригласившего о начисленных бонусных днях"""
+    if not referrer_id:
+        return
+    try:
+        await request.app["bot"].send_message(referrer_id,
+            f"<b>🤝 +{REFERRAL_BONUS_DAYS} дней к подписке</b>\n\n"
+            "Ваш друг оформил подписку — спасибо за рекомендацию!"
+        )
+    except Exception as e:
+        logger.warning("Не удалось уведомить пригласившего %s: %s", referrer_id, e)
+
 
 async def index(request):
     return web.FileResponse(os.path.join(STATIC_DIR, "index.html"), headers={"Cache-Control": "no-cache"})
 
 
 async def api_state(request):
-    return web.json_response(user_state(request["tg_user"]["id"]))
+    return web.json_response(user_state(request["tg_user"]["id"], request.app["bot"].username))
 
 
 async def api_trial(request):
     user_id = request["tg_user"]["id"]
     if is_subscription_active(user_id):
-        return web.json_response({"ok": True, "state": user_state(user_id)})
+        return web.json_response({"ok": True, "state": user_state(user_id, request.app['bot'].username)})
     if not trial_available(get_user(user_id)):
         return web.json_response({"error": "Пробный период уже использован"}, status=400)
     start_trial(user_id)
-    return web.json_response({"ok": True, "state": user_state(user_id)})
+    return web.json_response({"ok": True, "state": user_state(user_id, request.app['bot'].username)})
 
 
 async def api_pay(request):
@@ -194,8 +214,8 @@ async def api_pay(request):
         if not payment:
             return web.json_response({"error": "Не удалось создать счёт"}, status=502)
         if payment["payment_id"].startswith("demo-"):
-            record_payment(user_id, tariff_key, payment["payment_id"])
-            return web.json_response({"type": "paid", "state": user_state(user_id)})
+            await reward_referrer(request, record_payment(user_id, tariff_key, payment["payment_id"]))
+            return web.json_response({"type": "paid", "state": user_state(user_id, request.app['bot'].username)})
         return web.json_response({"type": "url", "url": payment["confirmation_url"], "payment_id": payment["payment_id"]})
 
     return web.json_response({"error": "Способ оплаты недоступен"}, status=400)
@@ -214,8 +234,8 @@ async def api_pay_check(request):
         return web.json_response({"paid": False})
     if metadata.get("user_id") != str(user_id) or metadata.get("tariff", tariff_key) != tariff_key:
         return web.json_response({"error": "Платёж не найден"}, status=400)
-    record_payment(user_id, tariff_key, payment_id)
-    return web.json_response({"paid": True, "state": user_state(user_id)})
+    await reward_referrer(request, record_payment(user_id, tariff_key, payment_id))
+    return web.json_response({"paid": True, "state": user_state(user_id, request.app['bot'].username)})
 
 
 async def api_key(request):
@@ -276,7 +296,7 @@ async def api_gift_order(request):
             )
         except Exception as e:
             logger.error("Не удалось уведомить админа о заказе творога: %s", e)
-    return web.json_response({"ok": True, "state": user_state(user_id)})
+    return web.json_response({"ok": True, "state": user_state(user_id, request.app['bot'].username)})
 
 
 def create_app(bot) -> web.Application:

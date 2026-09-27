@@ -7,811 +7,625 @@
 <title>Творог VPN</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
+/* Цвета берутся из темы Telegram — приложение выглядит как часть мессенджера.
+   Один фирменный цвет (--accent) + зелёный только для статуса «активна». */
 :root {
-  --bg: var(--tg-theme-secondary-bg-color, #0e1014);
-  --card: var(--tg-theme-section-bg-color, #181b22);
-  --card-2: color-mix(in srgb, var(--card) 88%, var(--text) 12%);
-  --text: var(--tg-theme-text-color, #f3f4f6);
-  --hint: var(--tg-theme-hint-color, #8a8f98);
-  --accent: var(--tg-theme-button-color, #4f7cff);
+  --bg: var(--tg-theme-secondary-bg-color, #0f0f10);
+  --surface: var(--tg-theme-section-bg-color, var(--tg-theme-bg-color, #1c1c1e));
+  --text: var(--tg-theme-text-color, #f2f2f3);
+  --hint: var(--tg-theme-hint-color, #8d8d93);
+  --accent: var(--tg-theme-button-color, #3e88f7);
   --accent-text: var(--tg-theme-button-text-color, #ffffff);
-  --link: var(--tg-theme-link-color, #6aa1ff);
-  --danger: var(--tg-theme-destructive-text-color, #ff5a5f);
-  --ok: #22c55e;
-  --gold: #f5b73b;
-  --sep: color-mix(in srgb, var(--hint) 20%, transparent);
-  --grad: linear-gradient(135deg, #8b5cf6 0%, #4f7cff 48%, #06b6d4 100%);
-  --radius: 20px;
-  --radius-sm: 14px;
-  --shadow: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.08);
-  --tabbar-h: 64px;
+  --danger: var(--tg-theme-destructive-text-color, #eb5545);
+  --ok: #30b85a;
+  --accent-soft: color-mix(in srgb, var(--accent) 13%, transparent);
+  --fill: color-mix(in srgb, var(--hint) 12%, transparent);
+  --line: color-mix(in srgb, var(--hint) 22%, transparent);
+  --r: 14px;
+  --tabbar-h: 58px;
   --safe-bottom: max(env(safe-area-inset-bottom), var(--tg-safe-area-inset-bottom, 0px));
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }
 body {
-  font: 15px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  min-height: 100vh;
-  overscroll-behavior: none;
+  font: 16px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased; min-height: 100vh; overscroll-behavior: none;
 }
-button { font: inherit; color: inherit; border: 0; background: none; padding: 0; cursor: pointer; }
-svg { display: block; }
-.icon { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
-.icon.fill { fill: currentColor; stroke: none; }
-.icon.sm { width: 18px; height: 18px; }
-.icon.lg { width: 28px; height: 28px; }
+button { font: inherit; color: inherit; border: 0; background: none; padding: 0; cursor: pointer; text-align: inherit; }
+.i { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.i.s { width: 18px; height: 18px; }
 
-/* ── Каркас ── */
-.app { max-width: 560px; margin: 0 auto; padding: 12px 16px calc(var(--tabbar-h) + var(--safe-bottom) + 24px); }
-.screen { display: none; animation: enter .28s cubic-bezier(.2,.8,.2,1); }
-.screen.active { display: block; }
-@keyframes enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.app { max-width: 540px; margin: 0 auto; padding: 8px 16px calc(var(--tabbar-h) + var(--safe-bottom) + 24px); }
+.screen { display: none; }
+.screen.active { display: block; animation: fade .2s ease-out; }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 
-.topbar { display: flex; align-items: center; gap: 10px; padding: 6px 2px 16px; }
-.logo { width: 34px; height: 34px; border-radius: 11px; background: var(--grad); display: grid; place-items: center; color: #fff; box-shadow: 0 6px 16px rgba(79,124,255,.35); }
-.logo .icon { width: 18px; height: 18px; }
-.brand { font-weight: 700; font-size: 18px; letter-spacing: -.2px; }
-.pill { margin-left: auto; font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 999px; background: var(--card); color: var(--hint); }
-.pill.demo { color: var(--gold); background: color-mix(in srgb, var(--gold) 14%, transparent); }
+/* Заголовки */
+.head { display: flex; align-items: center; gap: 10px; padding: 10px 4px 14px; }
+.mark { width: 30px; height: 30px; border-radius: 9px; background: var(--accent); color: var(--accent-text); display: grid; place-items: center; font-weight: 800; font-size: 17px; letter-spacing: -.5px; }
+.head-title { font-weight: 700; font-size: 17px; }
+.head-tag { margin-left: auto; font-size: 12px; color: var(--hint); border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; }
+h1 { font-size: 24px; line-height: 1.2; font-weight: 700; letter-spacing: -.3px; margin: 6px 4px 4px; }
+.lead { color: var(--hint); font-size: 15px; margin: 0 4px 18px; }
+.cap { font-size: 13px; text-transform: uppercase; letter-spacing: .3px; color: var(--hint); margin: 24px 16px 7px; }
+.foot { font-size: 13px; color: var(--hint); margin: 7px 16px 0; }
 
-h1 { font-size: 26px; line-height: 1.15; letter-spacing: -.4px; margin: 4px 2px 6px; }
-.subtitle { color: var(--hint); margin: 0 2px 18px; }
-.section-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; color: var(--hint); margin: 22px 6px 8px; }
+/* Поверхности и списки в стиле настроек Telegram */
+.box { background: var(--surface); border-radius: var(--r); overflow: hidden; }
+.row { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 50px; padding: 10px 16px; position: relative; }
+.row + .row::before { content: ""; position: absolute; top: 0; right: 0; left: 60px; border-top: 1px solid var(--line); }
+.row.plain + .row.plain::before, .row.plain + .row::before { left: 16px; }
+button.row:active { background: var(--fill); }
+.ico { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex: none; }
+.ico .i { width: 18px; height: 18px; }
+.row-main { flex: 1; min-width: 0; }
+.row-sub { font-size: 14px; color: var(--hint); margin-top: 1px; }
+.row-val { color: var(--hint); font-size: 15px; white-space: nowrap; }
+.chev { color: var(--hint); opacity: .6; width: 16px; height: 16px; }
 
-.card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); }
-
-/* ── Кнопки ── */
-.btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 52px; border-radius: var(--radius-sm); font-weight: 600; font-size: 16px; transition: transform .12s ease, opacity .2s; }
-.btn:active { transform: scale(.98); }
-.btn.primary { background: var(--accent); color: var(--accent-text); }
-.btn.gradient { background: var(--grad); color: #fff; box-shadow: 0 10px 24px rgba(79,124,255,.35); }
-.btn.soft { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
-.btn.ghost { background: var(--card-2); }
+/* Кнопки */
+.btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 50px; border-radius: 12px; font-weight: 600; font-size: 16px; transition: opacity .15s; text-align: center; }
+.btn:active { opacity: .75; }
+.btn.main { background: var(--accent); color: var(--accent-text); }
+.btn.soft { background: var(--accent-soft); color: var(--accent); }
 .btn[disabled] { opacity: .5; pointer-events: none; }
-.btn .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-.row-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.spin { width: 18px; height: 18px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: rot .7s linear infinite; }
+@keyframes rot { to { transform: rotate(360deg); } }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
-/* ── Главная: статус ── */
-.hero { position: relative; overflow: hidden; padding: 26px 20px 20px; text-align: center; }
-.hero::before { content: ""; position: absolute; inset: -40% -20% auto; height: 260px; background: radial-gradient(closest-side, rgba(79,124,255,.22), transparent); pointer-events: none; }
-.hero.on::before { background: radial-gradient(closest-side, rgba(34,197,94,.20), transparent); }
-.ring-wrap { position: relative; width: 188px; height: 188px; margin: 0 auto 14px; }
-.ring-wrap > svg { width: 100%; height: 100%; transform: rotate(-90deg); }
-.ring-track { stroke: var(--sep); }
-.ring-bar { transition: stroke-dashoffset 1.1s cubic-bezier(.2,.8,.2,1); }
-.ring-center { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 2px; }
-.ring-value { font-size: 52px; font-weight: 800; letter-spacing: -2px; line-height: 1; }
-.ring-label { color: var(--hint); font-size: 13px; font-weight: 500; }
-.ring-lock { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; background: var(--card-2); color: var(--hint); }
-.hero.on .ring-wrap { animation: breathe 3.2s ease-in-out infinite; }
-@keyframes breathe { 0%,100% { filter: drop-shadow(0 0 0 rgba(34,197,94,0)); } 50% { filter: drop-shadow(0 0 14px rgba(34,197,94,.35)); } }
-.status-title { font-size: 21px; font-weight: 700; letter-spacing: -.3px; display: inline-flex; align-items: center; gap: 8px; }
-.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--hint); }
-.hero.on .dot { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 22%, transparent); }
-.status-sub { color: var(--hint); margin: 4px 0 18px; }
+/* Главная: подписка */
+.sub { padding: 18px 16px 16px; }
+.sub-top { display: flex; align-items: center; justify-content: space-between; color: var(--hint); font-size: 14px; }
+.state { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; }
+.state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--hint); }
+.state.on { color: var(--ok); }
+.state.on::before { background: var(--ok); }
+.big { font-size: 34px; font-weight: 700; letter-spacing: -.8px; margin: 10px 0 0; line-height: 1.1; }
+.big small { font-size: 17px; font-weight: 600; letter-spacing: 0; color: var(--hint); }
+.sub-date { color: var(--hint); font-size: 15px; margin-top: 3px; }
+.bar { height: 6px; border-radius: 3px; background: var(--fill); margin: 14px 0 16px; overflow: hidden; }
+.bar > span { display: block; height: 100%; width: 0; border-radius: 3px; background: var(--ok); transition: width .8s cubic-bezier(.2,.8,.2,1); }
+.sub-text { color: var(--hint); font-size: 15px; margin: 8px 0 16px; }
 
-.chips { display: flex; gap: 8px; margin: 14px 0 4px; overflow-x: auto; scrollbar-width: none; }
-.chips::-webkit-scrollbar { display: none; }
-.chip { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 999px; background: var(--card); font-size: 13px; font-weight: 500; white-space: nowrap; }
-.chip .icon { width: 16px; height: 16px; color: var(--accent); }
+.promo { display: flex; align-items: center; gap: 14px; padding: 14px 16px; width: 100%; background: var(--accent-soft); border-radius: var(--r); margin-top: 10px; }
+.promo-title { font-weight: 600; color: var(--accent); }
+.promo-sub { font-size: 14px; color: var(--hint); margin-top: 1px; }
+.promo .ico { background: var(--accent); color: var(--accent-text); }
 
-.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.tile { position: relative; text-align: left; padding: 16px; min-height: 104px; display: flex; flex-direction: column; justify-content: space-between; transition: transform .12s; }
-.tile:active { transform: scale(.97); }
-.tile-icon { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; color: #fff; }
-.tile-title { font-weight: 600; margin-top: 12px; }
-.tile-sub { color: var(--hint); font-size: 13px; }
-.badge { position: absolute; top: 14px; right: 14px; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; background: var(--danger); color: #fff; }
-.bg-violet { background: linear-gradient(135deg,#8b5cf6,#6d28d9); }
-.bg-blue { background: linear-gradient(135deg,#4f7cff,#2563eb); }
-.bg-orange { background: linear-gradient(135deg,#fb923c,#f97316); }
-.bg-teal { background: linear-gradient(135deg,#2dd4bf,#0891b2); }
-.bg-green { background: linear-gradient(135deg,#34d399,#059669); }
-.bg-pink { background: linear-gradient(135deg,#f472b6,#db2777); }
-.bg-gray { background: linear-gradient(135deg,#9ca3af,#6b7280); }
+/* Тарифы */
+.plan { display: flex; align-items: center; gap: 14px; width: 100%; padding: 14px 16px; position: relative; }
+.plan + .plan::before { content: ""; position: absolute; top: 0; right: 0; left: 52px; border-top: 1px solid var(--line); }
+.radio { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line); flex: none; display: grid; place-items: center; }
+.plan.sel .radio { border-color: var(--accent); background: var(--accent); }
+.plan.sel .radio::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-text); }
+.plan-name { font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.tag { font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-soft); padding: 2px 7px; border-radius: 6px; }
+.price { text-align: right; white-space: nowrap; }
+.price b { font-size: 17px; font-weight: 600; }
+.price div { font-size: 13px; color: var(--hint); margin-top: 1px; }
 
-/* ── Тарифы ── */
-.plans { display: grid; gap: 10px; }
-.plan { position: relative; display: flex; align-items: center; gap: 14px; padding: 16px; border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow); border: 2px solid transparent; text-align: left; width: 100%; transition: border-color .2s, transform .12s; }
-.plan:active { transform: scale(.985); }
-.plan.selected { border-color: var(--accent); }
-.radio { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--sep); flex: none; display: grid; place-items: center; transition: .2s; }
-.plan.selected .radio { border-color: var(--accent); background: var(--accent); }
-.plan.selected .radio::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-text); }
-.plan-main { flex: 1; min-width: 0; }
-.plan-name { font-weight: 700; font-size: 17px; }
-.plan-meta { color: var(--hint); font-size: 13px; margin-top: 2px; }
-.plan-price { text-align: right; }
-.plan-price b { font-size: 19px; letter-spacing: -.3px; }
-.plan-price .stars { color: var(--hint); font-size: 13px; margin-top: 2px; }
-.plan-tag { position: absolute; top: -9px; left: 16px; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; color: #fff; background: var(--grad); letter-spacing: .2px; }
-.plan-tag.green { background: linear-gradient(135deg,#22c55e,#059669); }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; padding: 2px; background: var(--fill); border-radius: 10px; }
+.seg button { height: 36px; border-radius: 8px; font-size: 14px; font-weight: 600; color: var(--hint); text-align: center; }
+.seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
 
-.benefits { padding: 6px 16px; }
-.benefit { display: flex; align-items: center; gap: 12px; padding: 10px 0; }
-.benefit + .benefit { border-top: 1px solid var(--sep); }
-.benefit .icon { color: var(--ok); }
+.paybar { position: fixed; left: 0; right: 0; bottom: calc(var(--tabbar-h) + var(--safe-bottom)); z-index: 5; padding: 10px 16px 12px; background: var(--bg); border-top: 1px solid var(--line); }
+.paybar > div { max-width: 508px; margin: 0 auto; }
+.paynote { text-align: center; font-size: 13px; color: var(--hint); margin-top: 7px; }
+.pay-space { height: 96px; }
 
-.segmented { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 4px; background: var(--card); border-radius: 14px; box-shadow: var(--shadow); }
-.seg { height: 44px; border-radius: 10px; font-weight: 600; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--hint); transition: .2s; }
-.seg.active { background: var(--accent); color: var(--accent-text); }
+/* Подключение */
+.plats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; padding: 2px; background: var(--fill); border-radius: 10px; margin-bottom: 10px; }
+.plats button { height: 36px; border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--hint); text-align: center; }
+.plats button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.num { width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 14px; font-weight: 700; display: grid; place-items: center; flex: none; }
+.num.done { background: var(--ok); color: #fff; }
+.num .i { width: 15px; height: 15px; stroke-width: 2.4; }
+.qr { width: 216px; height: 216px; margin: 20px auto 12px; padding: 10px; background: #fff; border-radius: 12px; }
+.qr img { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+.code { font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; color: var(--hint); background: var(--fill); border-radius: 10px; padding: 10px 12px; margin: 0 16px 12px; white-space: pre; overflow: hidden; }
 
-.paybar { position: fixed; left: 0; right: 0; bottom: calc(var(--tabbar-h) + var(--safe-bottom)); padding: 12px 16px; background: linear-gradient(to top, var(--bg) 70%, transparent); z-index: 5; }
-.paybar-inner { max-width: 528px; margin: 0 auto; }
-.note { font-size: 12px; color: var(--hint); text-align: center; margin-top: 8px; }
-.spacer-pay { height: 90px; }
+/* Друзья */
+.ref-hero { padding: 20px 16px 16px; }
+.ref-num { font-size: 40px; font-weight: 700; letter-spacing: -1px; color: var(--accent); line-height: 1; }
+.ref-text { font-size: 15px; margin-top: 6px; }
+.ref-sub { font-size: 14px; color: var(--hint); margin-top: 4px; }
+.link { display: flex; align-items: center; gap: 10px; background: var(--fill); border-radius: 10px; padding: 0 6px 0 12px; height: 44px; margin: 16px 0 10px; }
+.link span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; color: var(--hint); }
+.link button { width: 36px; height: 36px; display: grid; place-items: center; color: var(--accent); border-radius: 8px; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); }
+.stat { padding: 14px 8px; text-align: center; }
+.stat + .stat { border-left: 1px solid var(--line); }
+.stat b { display: block; font-size: 22px; font-weight: 700; }
+.stat span { font-size: 13px; color: var(--hint); }
+.ava { width: 36px; height: 36px; border-radius: 50%; background: var(--fill); color: var(--hint); display: grid; place-items: center; font-weight: 600; font-size: 15px; flex: none; }
+.badge { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.badge.paid { color: var(--ok); }
+.badge.trial { color: var(--accent); }
+.badge.joined { color: var(--hint); font-weight: 500; }
+.empty { padding: 22px 16px; text-align: center; color: var(--hint); font-size: 15px; }
 
-/* ── Устройства ── */
-.platforms { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 6px; margin: 0 -2px; scrollbar-width: none; }
-.platforms::-webkit-scrollbar { display: none; }
-.platform { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; width: 76px; padding: 12px 0 10px; border-radius: 16px; background: var(--card); font-size: 12px; font-weight: 600; color: var(--hint); border: 2px solid transparent; transition: .2s; }
-.platform .icon { width: 26px; height: 26px; }
-.platform.active { color: var(--text); border-color: var(--accent); }
-.platform.active .icon { color: var(--accent); }
+/* Профиль */
+.me { display: flex; flex-direction: column; align-items: center; padding: 8px 0 4px; }
+.me-ava { width: 84px; height: 84px; border-radius: 50%; background: var(--accent); color: var(--accent-text); display: grid; place-items: center; font-size: 32px; font-weight: 600; overflow: hidden; }
+.me-ava img { width: 100%; height: 100%; object-fit: cover; }
+.me-name { font-size: 21px; font-weight: 700; margin-top: 10px; }
+.me-sub { color: var(--hint); font-size: 15px; }
 
-.steps { padding: 6px 16px 16px; }
-.step { display: grid; grid-template-columns: 32px 1fr; gap: 12px; padding-top: 14px; }
-.step-num { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 14px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
-.step.done .step-num { background: var(--ok); color: #fff; }
-.step-title { font-weight: 600; margin-top: 5px; }
-.step-text { color: var(--hint); font-size: 13px; margin: 2px 0 10px; }
-.links { display: grid; gap: 8px; }
-.link-row { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-radius: 12px; background: var(--card-2); font-weight: 500; font-size: 14px; }
-.link-row .icon:last-child { margin-left: auto; color: var(--hint); }
+/* Нижняя панель */
+.tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; background: var(--surface); border-top: 1px solid var(--line); padding-bottom: var(--safe-bottom); }
+.tabbar > div { max-width: 540px; margin: 0 auto; height: var(--tabbar-h); display: grid; grid-template-columns: repeat(5, 1fr); }
+.tab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 11px; font-weight: 500; color: var(--hint); text-align: center; }
+.tab .i { width: 24px; height: 24px; }
+.tab.on { color: var(--accent); }
 
-.keycard { padding: 20px; text-align: center; }
-.qr { width: 220px; height: 220px; margin: 4px auto 14px; padding: 12px; background: #fff; border-radius: 18px; box-shadow: 0 8px 30px rgba(0,0,0,.15); }
-.qr img { width: 100%; height: 100%; image-rendering: pixelated; display: block; }
-.key-title { font-weight: 700; font-size: 17px; }
-.key-sub { color: var(--hint); font-size: 13px; margin: 2px 0 16px; }
-.code { text-align: left; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; background: var(--card-2); border-radius: 12px; padding: 12px; color: var(--hint); max-height: 92px; overflow: hidden; position: relative; margin-bottom: 14px; white-space: pre; }
-.code::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 36px; background: linear-gradient(transparent, var(--card-2)); }
-
-/* ── Пустые состояния ── */
-.empty { padding: 28px 20px; text-align: center; }
-.empty-icon { width: 64px; height: 64px; margin: 0 auto 12px; border-radius: 20px; display: grid; place-items: center; color: #fff; }
-.empty-title { font-weight: 700; font-size: 18px; }
-.empty-text { color: var(--hint); margin: 6px 0 18px; }
-
-/* ── Профиль ── */
-.profile { display: flex; align-items: center; gap: 14px; padding: 18px; }
-.avatar { width: 60px; height: 60px; border-radius: 50%; background: var(--grad); color: #fff; display: grid; place-items: center; font-size: 22px; font-weight: 700; overflow: hidden; flex: none; }
-.avatar img { width: 100%; height: 100%; object-fit: cover; }
-.profile-name { font-weight: 700; font-size: 19px; }
-.profile-sub { color: var(--hint); font-size: 14px; }
-.list { overflow: hidden; }
-.list-row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; width: 100%; text-align: left; min-height: 52px; }
-.list-row + .list-row { border-top: 1px solid var(--sep); }
-button.list-row:active { background: var(--card-2); }
-.list-icon { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: #fff; }
-.list-icon .icon { width: 17px; height: 17px; }
-.list-label { flex: 1; }
-.list-value { color: var(--hint); }
-.list-row .chev { color: var(--hint); width: 18px; height: 18px; }
-.status-badge { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; }
-.status-badge.on { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
-.status-badge.off { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
-.footer { text-align: center; color: var(--hint); font-size: 12px; margin-top: 22px; }
-
-/* ── Нижнее меню ── */
-.tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; padding-bottom: var(--safe-bottom); background: color-mix(in srgb, var(--card) 86%, transparent); backdrop-filter: saturate(180%) blur(18px); -webkit-backdrop-filter: saturate(180%) blur(18px); border-top: 1px solid var(--sep); }
-.tabbar-inner { max-width: 560px; margin: 0 auto; height: var(--tabbar-h); display: grid; grid-template-columns: repeat(4, 1fr); }
-.tab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 11px; font-weight: 600; color: var(--hint); transition: color .2s; }
-.tab .icon { width: 24px; height: 24px; transition: transform .2s; }
-.tab.active { color: var(--accent); }
-.tab.active .icon { transform: translateY(-1px) scale(1.06); }
-
-/* ── Шторка ── */
-.sheet-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 20; }
-.sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; max-height: 88vh; overflow-y: auto; background: var(--bg); border-radius: 24px 24px 0 0; padding: 10px 16px calc(24px + var(--safe-bottom)); transform: translateY(105%); transition: transform .32s cubic-bezier(.2,.8,.2,1); }
-.sheet-open .sheet-backdrop { opacity: 1; pointer-events: auto; }
-.sheet-open .sheet { transform: none; }
-.sheet-handle { width: 40px; height: 5px; border-radius: 3px; background: var(--sep); margin: 0 auto 14px; }
-.sheet-inner { max-width: 528px; margin: 0 auto; }
+/* Шторка */
+.dim { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.4); opacity: 0; pointer-events: none; transition: opacity .2s; }
+.sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; max-height: 86vh; overflow-y: auto; background: var(--bg); border-radius: 14px 14px 0 0; padding: 8px 16px calc(20px + var(--safe-bottom)); transform: translateY(102%); transition: transform .28s cubic-bezier(.2,.8,.2,1); }
+.sheet > div { max-width: 508px; margin: 0 auto; }
+.grab { width: 36px; height: 5px; border-radius: 3px; background: var(--line); margin: 0 auto 10px; }
+body.sheet-open .dim { opacity: 1; pointer-events: auto; }
+body.sheet-open .sheet { transform: none; }
 .cities { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.city { padding: 14px 12px; border-radius: 14px; background: var(--card); font-weight: 600; text-align: left; }
-.city:active { transform: scale(.98); }
+.cities button { background: var(--surface); border-radius: 10px; padding: 13px 14px; font-weight: 500; }
+.cities button:active { background: var(--fill); }
 
-/* ── Успех ── */
-.overlay { position: fixed; inset: 0; z-index: 30; background: var(--bg); display: none; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; }
-.overlay.show { display: flex; animation: enter .3s ease; }
-.success-mark { width: 104px; height: 104px; border-radius: 50%; background: linear-gradient(135deg,#34d399,#059669); display: grid; place-items: center; color: #fff; box-shadow: 0 16px 40px rgba(16,185,129,.4); animation: pop .5s cubic-bezier(.2,1.4,.4,1); }
-.success-mark .icon { width: 52px; height: 52px; stroke-width: 3; stroke-dasharray: 30; stroke-dashoffset: 30; animation: draw .45s .25s ease forwards; }
-@keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: none; opacity: 1; } }
-@keyframes draw { to { stroke-dashoffset: 0; } }
-.overlay h2 { font-size: 26px; margin: 22px 0 6px; letter-spacing: -.4px; }
-.overlay p { color: var(--hint); margin: 0 0 26px; max-width: 320px; }
-.overlay .btn { max-width: 360px; }
-.overlay .btn + .btn { margin-top: 10px; }
+/* Экран результата */
+.done { position: fixed; inset: 0; z-index: 30; background: var(--bg); display: none; flex-direction: column; align-items: center; justify-content: center; padding: 24px 24px calc(24px + var(--safe-bottom)); text-align: center; }
+.done.show { display: flex; animation: fade .2s ease-out; }
+.done-ico { width: 72px; height: 72px; border-radius: 50%; background: var(--ok); color: #fff; display: grid; place-items: center; animation: pop .35s cubic-bezier(.2,1.3,.4,1); }
+.done-ico .i { width: 38px; height: 38px; stroke-width: 2.6; }
+@keyframes pop { from { transform: scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
+.done h2 { font-size: 22px; margin: 18px 0 6px; }
+.done p { color: var(--hint); margin: 0 0 24px; max-width: 320px; font-size: 15px; }
+.done .btn { max-width: 340px; }
+.done .btn + .btn { margin-top: 8px; }
 
-/* ── Тост ── */
-.toast { position: fixed; left: 50%; top: calc(12px + env(safe-area-inset-top)); transform: translate(-50%, -24px); opacity: 0; visibility: hidden; width: max-content; z-index: 40; background: color-mix(in srgb, var(--text) 92%, transparent); color: var(--bg); padding: 11px 16px; border-radius: 14px; font-weight: 600; font-size: 14px; box-shadow: 0 10px 30px rgba(0,0,0,.25); transition: transform .35s cubic-bezier(.2,.8,.2,1), opacity .25s, visibility .25s; max-width: calc(100% - 32px); display: flex; align-items: center; gap: 8px; }
-.toast.show { transform: translate(-50%, 0); opacity: 1; visibility: visible; }
+/* Уведомление */
+.toast { position: fixed; left: 50%; top: calc(10px + env(safe-area-inset-top)); z-index: 40; transform: translate(-50%, -10px); opacity: 0; visibility: hidden; width: max-content; max-width: calc(100% - 32px); background: rgba(40,40,42,.96); color: #fff; padding: 10px 14px; border-radius: 10px; font-size: 14px; font-weight: 500; transition: .2s; display: flex; align-items: center; gap: 8px; }
+.toast.show { opacity: 1; visibility: visible; transform: translate(-50%, 0); }
 
-/* ── Загрузка ── */
-.skeleton { background: linear-gradient(90deg, var(--card) 25%, var(--card-2) 50%, var(--card) 75%); background-size: 200% 100%; animation: shimmer 1.3s infinite; border-radius: var(--radius); }
-@keyframes shimmer { to { background-position: -200% 0; } }
-.mt { margin-top: 10px; } .mt2 { margin-top: 18px; }
-.center-screen { min-height: 80vh; display: grid; place-items: center; text-align: center; }
-
+/* Загрузка */
+.sk { background: var(--surface); border-radius: var(--r); position: relative; overflow: hidden; }
+.sk::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, var(--fill), transparent); animation: sh 1.2s infinite; transform: translateX(-100%); }
+@keyframes sh { to { transform: translateX(100%); } }
+.gap { height: 10px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body>
-<div class="app" id="app">
+<main class="app">
   <div id="loading">
-    <div class="skeleton" style="height:42px;width:55%;margin:6px 0 18px"></div>
-    <div class="skeleton" style="height:330px"></div>
-    <div class="skeleton mt2" style="height:40px"></div>
-    <div class="tiles mt2"><div class="skeleton" style="height:104px"></div><div class="skeleton" style="height:104px"></div><div class="skeleton" style="height:104px"></div><div class="skeleton" style="height:104px"></div></div>
+    <div class="sk" style="height:36px;width:50%;margin:10px 0 16px"></div>
+    <div class="sk" style="height:220px"></div><div class="gap"></div>
+    <div class="sk" style="height:64px"></div><div class="gap"></div>
+    <div class="sk" style="height:150px"></div>
   </div>
+  <section class="screen" id="s-home"></section>
+  <section class="screen" id="s-plans"></section>
+  <section class="screen" id="s-connect"></section>
+  <section class="screen" id="s-friends"></section>
+  <section class="screen" id="s-profile"></section>
+  <section class="screen" id="s-error"></section>
+</main>
 
-  <section class="screen" id="screen-home"></section>
-  <section class="screen" id="screen-plans"></section>
-  <section class="screen" id="screen-devices"></section>
-  <section class="screen" id="screen-profile"></section>
-  <section class="screen" id="screen-error"></section>
-</div>
+<div class="paybar" id="paybar" hidden><div id="paybar-in"></div></div>
 
-<div class="paybar" id="paybar" hidden><div class="paybar-inner" id="paybar-inner"></div></div>
+<nav class="tabbar" id="tabbar" hidden><div>
+  <button class="tab" data-tab="home"><svg class="i"><use href="#home"/></svg>Главная</button>
+  <button class="tab" data-tab="plans"><svg class="i"><use href="#card"/></svg>Тарифы</button>
+  <button class="tab" data-tab="connect"><svg class="i"><use href="#key"/></svg>Ключ</button>
+  <button class="tab" data-tab="friends"><svg class="i"><use href="#users"/></svg>Друзья</button>
+  <button class="tab" data-tab="profile"><svg class="i"><use href="#user"/></svg>Профиль</button>
+</div></nav>
 
-<nav class="tabbar" id="tabbar" hidden>
-  <div class="tabbar-inner">
-    <button class="tab" data-tab="home"><svg class="icon"><use href="#i-home"/></svg>Главная</button>
-    <button class="tab" data-tab="plans"><svg class="icon"><use href="#i-card"/></svg>Тарифы</button>
-    <button class="tab" data-tab="devices"><svg class="icon"><use href="#i-key"/></svg>Подключение</button>
-    <button class="tab" data-tab="profile"><svg class="icon"><use href="#i-user"/></svg>Профиль</button>
-  </div>
-</nav>
-
-<div id="sheet-root">
-  <div class="sheet-backdrop" id="sheet-backdrop"></div>
-  <div class="sheet"><div class="sheet-handle"></div><div class="sheet-inner" id="sheet"></div></div>
-</div>
-
-<div class="overlay" id="success"></div>
+<div class="dim" id="dim"></div>
+<div class="sheet"><div><div class="grab"></div><div id="sheet"></div></div></div>
+<div class="done" id="done"></div>
 <div class="toast" id="toast"></div>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></symbol>
-  <symbol id="i-card" viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="M2.5 10h19M6.5 15h4"/></symbol>
-  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M16 7l3 3M14 9l2 2"/></symbol>
-  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
-  <symbol id="i-gift" viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M5 12v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-8M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/></symbol>
-  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></symbol>
-  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8.5 8 9 4.5-.5 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
-  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
-  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
-  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></symbol>
-  <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></symbol>
-  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"/></symbol>
-  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
-  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></symbol>
-  <symbol id="i-infinity" viewBox="0 0 24 24"><path d="M12 12c-2-2.7-3.6-4-5.5-4a4 4 0 0 0 0 8c1.9 0 3.5-1.3 5.5-4zm0 0c2 2.7 3.6 4 5.5 4a4 4 0 0 0 0-8c-1.9 0-3.5 1.3-5.5 4z"/></symbol>
-  <symbol id="i-devices" viewBox="0 0 24 24"><rect x="2" y="4" width="14" height="11" rx="2"/><rect x="15" y="9" width="7" height="12" rx="1.5"/><path d="M6 19h6"/></symbol>
-  <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/></symbol>
-  <symbol id="i-headset" viewBox="0 0 24 24"><path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/></symbol>
-  <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
-  <symbol id="i-hash" viewBox="0 0 24 24"><path d="M5 9h14M5 15h14M10 4 8 20M16 4l-2 16"/></symbol>
-  <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 4v4M9 13h.01M15 13h.01M9.5 17h5"/></symbol>
-  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></symbol>
-  <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0"/></symbol>
-  <symbol id="p-apple" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M16.4 12.6c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.2-2.8.8-3.5.8-.7 0-1.8-.8-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7c1.3 0 2.1-1.1 2.8-2.3.9-1.3 1.3-2.6 1.3-2.6s-2.5-1-2.5-3.7zM14.2 5.8c.6-.8 1.1-1.9 1-3-.9 0-2.1.6-2.7 1.4-.6.7-1.1 1.8-1 2.9 1 .1 2.1-.5 2.7-1.3z"/></symbol>
-  <symbol id="p-android" viewBox="0 0 24 24"><path d="M6 18v-7a6 6 0 0 1 12 0v7a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1zM6 13h12M8.5 5.5 7 3M15.5 5.5 17 3"/><path d="M9.5 9h.01M14.5 9h.01"/></symbol>
-  <symbol id="p-windows" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M3 5.6 10.4 4.6v6.9H3zM11.6 4.4 21 3v8.5h-9.4zM3 12.6h7.4v6.9L3 18.5zM11.6 12.6H21V21l-9.4-1.3z"/></symbol>
-  <symbol id="p-laptop" viewBox="0 0 24 24"><rect x="4" y="4.5" width="16" height="11" rx="1.5"/><path d="M2 19.5h20"/></symbol>
-  <symbol id="p-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M12.5 15H17"/></symbol>
+  <symbol id="home" viewBox="0 0 24 24"><path d="M4 10.2 12 4l8 6.2V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="card" viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M3 10h18M7 14.5h3"/></symbol>
+  <symbol id="key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 8.5-8.5M16.5 6.5l2.5 2.5M14.5 8.5l2 2"/></symbol>
+  <symbol id="users" viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.5"/><path d="M2.5 19.5a6.5 6.5 0 0 1 13 0M16 5.2a3.5 3.5 0 0 1 0 6.6M18 13.6a6.5 6.5 0 0 1 3.5 5.9"/></symbol>
+  <symbol id="user" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></symbol>
+  <symbol id="gift" viewBox="0 0 24 24"><rect x="3.5" y="8" width="17" height="4" rx="1"/><path d="M12 8v12.5M5.5 12v7.5a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V12M12 8S11 4 8.3 4a2 2 0 0 0 0 4M12 8s1-4 3.7-4a2 2 0 0 1 0 4"/></symbol>
+  <symbol id="chat" viewBox="0 0 24 24"><path d="M20 11.5a7.5 7.5 0 0 1-10.9 6.7L4.5 19.5l1.2-4.1A7.5 7.5 0 1 1 20 11.5z"/></symbol>
+  <symbol id="check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+  <symbol id="copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/></symbol>
+  <symbol id="send" viewBox="0 0 24 24"><path d="M20.5 3.5 10 14M20.5 3.5l-6.5 17-4-6.5-6.5-4z"/></symbol>
+  <symbol id="share" viewBox="0 0 24 24"><path d="M12 15V4M8 7.5 12 3.5l4 4M5 12v6.5a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5V12"/></symbol>
+  <symbol id="down" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 20h14"/></symbol>
+  <symbol id="chevr" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6"/></symbol>
+  <symbol id="cal" viewBox="0 0 24 24"><rect x="4" y="5.5" width="16" height="15" rx="2"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/></symbol>
+  <symbol id="dev" viewBox="0 0 24 24"><rect x="3" y="5" width="13" height="10" rx="1.5"/><rect x="15" y="9" width="6" height="11" rx="1.5"/><path d="M6.5 19h6"/></symbol>
+  <symbol id="shield" viewBox="0 0 24 24"><path d="M12 3.5 5 6v5.5c0 4.5 3 7.8 7 9 4-1.2 7-4.5 7-9V6z"/></symbol>
+  <symbol id="hash" viewBox="0 0 24 24"><path d="M5 9h14M5 15h14M10 4.5 8.5 19.5M15.5 4.5 14 19.5"/></symbol>
+  <symbol id="bot" viewBox="0 0 24 24"><rect x="4.5" y="8" width="15" height="11.5" rx="3"/><path d="M12 4.5V8M9.5 13h0M14.5 13h0M10 16.5h4"/></symbol>
+  <symbol id="pin" viewBox="0 0 24 24"><path d="M12 20.5s-6.5-5.8-6.5-10.8a6.5 6.5 0 0 1 13 0c0 5-6.5 10.8-6.5 10.8z"/><circle cx="12" cy="9.8" r="2.3"/></symbol>
+  <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
 </svg>
 
 <script>
 (() => {
   const tg = window.Telegram && window.Telegram.WebApp;
   const initData = tg ? tg.initData : "";
-  const tgUser = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) || {};
-
-  const $ = (sel, root = document) => root.querySelector(sel);
-  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const icon = (id, cls = "") => `<svg class="icon ${cls}"><use href="#${id}"/></svg>`;
-  const plural = (n, one, few, many) => {
-    const m10 = n % 10, m100 = n % 100;
-    if (m10 === 1 && m100 !== 11) return one;
-    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
-    return many;
-  };
+  const me = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) || {};
+  const $ = (q) => document.querySelector(q);
+  const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const svg = (id, cls = "") => `<svg class="i ${cls}"><use href="#${id}"/></svg>`;
+  const plural = (n, a, b, c) => { const t = n % 10, h = n % 100; return t === 1 && h !== 11 ? a : t >= 2 && t <= 4 && (h < 12 || h > 14) ? b : c; };
   const days = (n) => `${n} ${plural(n, "день", "дня", "дней")}`;
-  const rub = (n) => `${n.toLocaleString("ru-RU")} ₽`;
+  const rub = (n) => `${Number(n).toLocaleString("ru-RU")} ₽`;
+  const initials = (name) => String(name || "?").replace(/^@/, "").trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 
-  const haptic = (kind = "light") => {
-    try {
-      const h = tg && tg.HapticFeedback;
-      if (!h) return;
-      if (kind === "success" || kind === "error" || kind === "warning") h.notificationOccurred(kind);
-      else if (kind === "select") h.selectionChanged();
-      else h.impactOccurred(kind);
-    } catch (e) {}
+  const haptic = (k = "light") => {
+    const h = tg && tg.HapticFeedback; if (!h) return;
+    try { k === "success" || k === "error" || k === "warning" ? h.notificationOccurred(k) : k === "select" ? h.selectionChanged() : h.impactOccurred(k); } catch (e) {}
   };
-
-  let toastTimer;
-  const toast = (text, ic = "i-check") => {
-    const el = $("#toast");
-    el.innerHTML = `${icon(ic, "sm")}<span>${esc(text)}</span>`;
-    el.classList.add("show");
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.remove("show"), 2600);
-  };
+  let toastT;
+  const toast = (text) => { const t = $("#toast"); t.textContent = text; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2200); };
 
   async function api(path, body) {
-    const res = await fetch(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Init-Data": initData },
-      body: JSON.stringify(body || {}),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "Что-то пошло не так");
-    return data;
+    const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Init-Data": initData }, body: JSON.stringify(body || {}) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || "Что-то пошло не так. Попробуйте ещё раз.");
+    return d;
+  }
+  const open = (url) => { if (!tg) return window.open(url, "_blank"); url.startsWith("https://t.me/") ? tg.openTelegramLink(url) : tg.openLink(url); };
+  async function busy(btn, fn) {
+    if (btn.disabled) return; const html = btn.innerHTML; btn.disabled = true; btn.innerHTML = `<span class="spin"></span>`;
+    try { await fn(); } catch (e) { haptic("error"); toast(e.message); } finally { btn.disabled = false; btn.innerHTML = html; }
+  }
+  async function copy(text, msg) {
+    try { await navigator.clipboard.writeText(text); }
+    catch (e) { const a = document.createElement("textarea"); a.value = text; document.body.appendChild(a); a.select(); try { document.execCommand("copy"); } catch (_) {} a.remove(); }
+    haptic("success"); toast(msg);
   }
 
-  const openLink = (url) => {
-    if (!tg) return window.open(url, "_blank");
-    if (url.startsWith("https://t.me/")) tg.openTelegramLink(url); else tg.openLink(url);
-  };
-
-  async function withLoading(btn, fn) {
-    if (btn.disabled) return;
-    const html = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = `<span class="spinner"></span>`;
-    try { await fn(); } finally { btn.disabled = false; btn.innerHTML = html; }
-  }
-
-  // ── Состояние ──
   let S = null;
-  const ui = { tab: "home", plan: null, method: null, device: null, key: null, pendingCard: null };
+  const ui = { tab: "home", plan: null, method: null, device: null, key: null, card: null };
 
-  function setState(state) {
-    S = state;
-    if (!ui.plan) ui.plan = (S.tariffs.find((t) => t.key === "quarter") || S.tariffs[0]).key;
-    if (!ui.method) ui.method = S.methods.stars ? "stars" : "card";
-    if (!ui.device) ui.device = detectDevice();
-    renderAll();
+  function setState(s) {
+    S = s;
+    ui.plan = ui.plan || (S.tariffs.find((t) => t.key === "quarter") || S.tariffs[0]).key;
+    ui.method = ui.method || (S.methods.stars ? "stars" : "card");
+    ui.device = ui.device || guessDevice();
+    render();
   }
-
-  function detectDevice() {
+  function guessDevice() {
     const p = (tg && tg.platform) || navigator.userAgent;
-    if (/ios|iphone|ipad/i.test(p)) return "iphone";
-    if (/android/i.test(p)) return "android";
-    if (/mac/i.test(p)) return "mac";
-    if (/win/i.test(p)) return "windows";
-    if (/linux/i.test(p)) return "linux";
-    return "iphone";
+    return /ios|iphone|ipad/i.test(p) ? "iphone" : /android/i.test(p) ? "android" : /mac/i.test(p) ? "mac" : /win/i.test(p) ? "windows" : /linux/i.test(p) ? "linux" : "iphone";
   }
 
-  // ── Навигация ──
   function go(tab) {
     if (ui.tab !== tab) haptic("select");
     ui.tab = tab;
-    document.querySelectorAll(".screen").forEach((s) => s.classList.toggle("active", s.id === `screen-${tab}`));
-    document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab));
-    renderPaybar();
-    window.scrollTo({ top: 0 });
+    document.querySelectorAll(".screen").forEach((s) => s.classList.toggle("active", s.id === `s-${tab}`));
+    document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.tab === tab));
+    renderPaybar(); window.scrollTo(0, 0);
   }
   document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => go(t.dataset.tab)));
 
-  function renderAll() {
-    $("#loading").hidden = true;
-    $("#tabbar").hidden = false;
-    renderHome(); renderPlans(); renderDevices(); renderProfile();
+  function render() {
+    $("#loading").hidden = true; $("#tabbar").hidden = false;
+    home(); plans(); connect(); friends(); profile();
     go(ui.tab);
   }
-
-  const topbar = () => `
-    <div class="topbar">
-      <div class="logo">${icon("i-lock")}</div>
-      <div class="brand">${esc(S.brand)}</div>
-      ${S.demo ? `<span class="pill demo">Демо</span>` : ""}
-    </div>`;
+  const head = () => `<div class="head"><div class="mark">Т</div><div class="head-title">${esc(S.brand)}</div>${S.demo ? `<span class="head-tag">демо</span>` : ""}</div>`;
+  const row = (icon, title, opts = {}) => {
+    const tag = opts.act || opts.go || opts.link ? "button" : "div";
+    const data = opts.act ? `data-act="${opts.act}"` : opts.go ? `data-go="${opts.go}"` : opts.link ? `data-link="${esc(opts.link)}"` : "";
+    return `<${tag} class="row" ${data}><span class="ico">${svg(icon)}</span><span class="row-main">${title}${opts.sub ? `<div class="row-sub">${opts.sub}</div>` : ""}</span>${opts.val ? `<span class="row-val">${opts.val}</span>` : ""}${tag === "button" ? svg("chevr", "chev") : ""}</${tag}>`;
+  };
 
   // ── Главная ──
-  function renderHome() {
-    const sub = S.subscription;
-    const on = sub.active;
-    const R = 80, C = 2 * Math.PI * R;
-    const progress = on ? Math.min(1, sub.days_left / Math.max(sub.period_days, 1)) : 0;
-    let cta = "";
-    if (!on && S.trial.available) cta = `<button class="btn gradient" data-act="trial">${icon("i-gift")}Попробовать ${days(S.trial.days)} бесплатно</button>`;
-    else if (!on) cta = `<button class="btn primary" data-go="plans">Выбрать тариф</button>`;
-    else if (!S.has_key) cta = `<button class="btn primary" data-go="devices">${icon("i-key")}Подключить устройство</button>`;
-    else cta = `<button class="btn soft" data-go="plans">Продлить подписку</button>`;
-
-    $("#screen-home").innerHTML = `
-      ${topbar()}
-      <div class="card hero ${on ? "on" : ""}">
-        <div class="ring-wrap">
-          <svg viewBox="0 0 188 188">
-            <defs><linearGradient id="rg" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stop-color="${on ? "#34d399" : "#8b5cf6"}"/><stop offset="1" stop-color="${on ? "#06b6d4" : "#4f7cff"}"/>
-            </linearGradient></defs>
-            <circle class="ring-track" cx="94" cy="94" r="${R}" fill="none" stroke-width="12"/>
-            <circle class="ring-bar" id="ring-bar" cx="94" cy="94" r="${R}" fill="none" stroke="url(#rg)" stroke-width="12" stroke-linecap="round"
-              stroke-dasharray="${C}" stroke-dashoffset="${C}"/>
-          </svg>
-          <div class="ring-center">
-            ${on
-              ? `<div class="ring-value">${sub.days_left}</div><div class="ring-label">${plural(sub.days_left, "день остался", "дня осталось", "дней осталось")}</div>`
-              : `<div class="ring-lock">${icon("i-lock", "lg")}</div>`}
-          </div>
-        </div>
-        <div class="status-title"><span class="dot"></span>${on ? "Защита активна" : sub.ever ? "Подписка закончилась" : "Подписка не активна"}</div>
-        <div class="status-sub">${on ? `Действует до ${sub.expires}` : sub.ever ? `Закончилась ${sub.expires}` : "Быстрый и стабильный VPN на каждый день"}</div>
-        ${cta}
-      </div>
-
-      <div class="chips">
-        <span class="chip">${icon("i-devices")}До ${S.max_devices} устройств</span>
-        <span class="chip">${icon("i-infinity")}Безлимитный трафик</span>
-        <span class="chip">${icon("i-zap")}До 10 Гбит/с</span>
-        <span class="chip">${icon("i-headset")}Поддержка 24/7</span>
-      </div>
-
-      <div class="section-title">Быстрые действия</div>
-      <div class="tiles">
-        <button class="card tile" data-go="devices"><div class="tile-icon bg-blue">${icon("i-key")}</div><div><div class="tile-title">Подключить</div><div class="tile-sub">Ключ и QR-код</div></div></button>
-        <button class="card tile" data-go="plans"><div class="tile-icon bg-violet">${icon("i-card")}</div><div><div class="tile-title">${on ? "Продлить" : "Тарифы"}</div><div class="tile-sub">от ${rub(Math.min(...S.tariffs.map((t) => t.per_month)))}/мес</div></div></button>
-        <button class="card tile" data-act="gift">${S.cheese.eligible ? `<span class="badge">1</span>` : ""}<div class="tile-icon bg-orange">${icon("i-gift")}</div><div><div class="tile-title">Творог</div><div class="tile-sub">Подарок к подписке</div></div></button>
-        <button class="card tile" data-act="support"><div class="tile-icon bg-teal">${icon("i-chat")}</div><div><div class="tile-title">Поддержка</div><div class="tile-sub">Ответим за 15 мин</div></div></button>
+  function home() {
+    const s = S.subscription, on = s.active, R = S.referral;
+    let card;
+    if (on) {
+      card = `
+        <div class="sub-top"><span>Подписка</span><span class="state on">Активна</span></div>
+        <div class="big">${s.days_left} <small>${plural(s.days_left, "день", "дня", "дней")}</small></div>
+        <div class="sub-date">до ${s.expires}</div>
+        <div class="bar"><span id="bar"></span></div>
+        ${S.has_key ? `<button class="btn soft" data-go="plans">Продлить подписку</button>` : `<button class="btn main" data-go="connect">Подключить устройство</button>`}`;
+    } else {
+      card = `
+        <div class="sub-top"><span>Подписка</span><span class="state">${s.ever ? "Закончилась" : "Не оформлена"}</span></div>
+        <div class="big" style="font-size:26px">${s.ever ? "Продлите подписку" : "VPN без ограничений"}</div>
+        <div class="sub-text">${s.ever ? `Подписка закончилась ${s.expires}. Продлите, чтобы снова пользоваться VPN.` : S.trial.invited ? `Вы пришли по приглашению — ${days(S.trial.days)} бесплатно вместо ${S.referral.base_trial_days}.` : `До ${S.max_devices} устройств, безлимитный трафик. Без привязки карты.`}</div>
+        ${S.trial.available ? `<button class="btn main" data-act="trial">Попробовать ${days(S.trial.days)} бесплатно</button>` : `<button class="btn main" data-go="plans">Выбрать тариф</button>`}`;
+    }
+    const cheese = S.cheese.eligible ? "Доступен" : S.cheese.status !== "none" ? "Заказан" : "от 1 месяца";
+    $("#s-home").innerHTML = `
+      ${head()}
+      <div class="box sub">${card}</div>
+      <button class="promo" data-go="friends">
+        <span class="ico">${svg("users")}</span>
+        <span class="row-main"><div class="promo-title">+${days(R.bonus_days)} за каждого друга</div><div class="promo-sub">Приглашено ${R.invited} · получено ${days(R.earned_days)}</div></span>
+        ${svg("chevr", "chev")}
+      </button>
+      <div class="cap">Сервис</div>
+      <div class="box">
+        ${row("key", "Подключить устройство", { go: "connect", sub: "Ключ и QR-код" })}
+        ${row("card", on ? "Продлить подписку" : "Тарифы", { go: "plans", sub: `от ${rub(Math.min(...S.tariffs.map((t) => t.per_month)))} в месяц` })}
+        ${row("gift", "Творог в подарок", { act: "gift", val: cheese })}
+        ${row("chat", "Поддержка", { act: "support", val: "24/7" })}
       </div>`;
-
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      const bar = $("#ring-bar");
-      if (bar) bar.style.strokeDashoffset = String(C * (1 - progress));
+    if (on) requestAnimationFrame(() => requestAnimationFrame(() => {
+      const b = $("#bar"); if (b) b.style.width = `${Math.max(4, Math.min(100, (s.days_left / Math.max(s.period_days, 1)) * 100))}%`;
     }));
   }
 
   // ── Тарифы ──
-  function renderPlans() {
-    const best = S.tariffs.reduce((a, b) => (b.discount > a.discount ? b : a), S.tariffs[0]);
-    const plans = S.tariffs.map((t) => `
-      <button class="plan ${ui.plan === t.key ? "selected" : ""}" data-plan="${t.key}">
-        ${t.key === best.key && best.discount > 0 ? `<span class="plan-tag green">Выгодно −${t.discount}%</span>` : t.key === "quarter" ? `<span class="plan-tag">Популярный</span>` : ""}
-        <span class="radio"></span>
-        <div class="plan-main">
-          <div class="plan-name">${esc(t.name)}</div>
-          <div class="plan-meta">${t.days > 31 ? `${rub(t.per_month)} в месяц` : days(t.days)}${t.cheese ? " · 🎁 творог" : ""}</div>
-        </div>
-        <div class="plan-price"><b>${rub(t.price)}</b>${t.stars ? `<div class="stars">или ${t.stars} ⭐</div>` : ""}</div>
-      </button>`).join("");
-
-    const methods = [];
-    if (S.methods.stars) methods.push(`<button class="seg ${ui.method === "stars" ? "active" : ""}" data-method="stars">⭐ Telegram Stars</button>`);
-    if (S.methods.card) methods.push(`<button class="seg ${ui.method === "card" ? "active" : ""}" data-method="card">${icon("i-card", "sm")}Карта / СБП</button>`);
-
-    $("#screen-plans").innerHTML = `
-      ${topbar()}
-      <h1>${S.subscription.active ? "Продлить подписку" : "Выберите тариф"}</h1>
-      <p class="subtitle">${S.subscription.active ? `Новый период добавится к текущему сроку (сейчас — до ${S.subscription.expires}).` : "Отмена не нужна — подписка не продлевается автоматически."}</p>
-      <div class="plans">${plans}</div>
-
-      <div class="section-title">Что входит</div>
-      <div class="card benefits">
-        <div class="benefit">${icon("i-check")}До ${S.max_devices} устройств на одну подписку</div>
-        <div class="benefit">${icon("i-check")}Безлимитный трафик и высокая скорость</div>
-        <div class="benefit">${icon("i-check")}Не храним историю посещений</div>
-        <div class="benefit">${icon("i-check")}🎁 Творог в подарок от 1 месяца</div>
+  function plans() {
+    const best = S.tariffs.reduce((a, b) => (b.discount > a.discount ? b : a));
+    $("#s-plans").innerHTML = `
+      ${head()}
+      <h1>${S.subscription.active ? "Продление" : "Тарифы"}</h1>
+      <p class="lead">${S.subscription.active ? `Дни добавятся к текущей подписке (сейчас — до ${S.subscription.expires}).` : "Подписка не продлевается автоматически — отменять ничего не нужно."}</p>
+      <div class="box">${S.tariffs.map((t) => `
+        <button class="plan ${ui.plan === t.key ? "sel" : ""}" data-plan="${t.key}">
+          <span class="radio"></span>
+          <span class="row-main">
+            <span class="plan-name">${esc(t.name)}${t.key === best.key && t.discount > 0 ? `<span class="tag">−${t.discount}%</span>` : ""}</span>
+            <div class="row-sub">${t.days > 31 ? `${rub(t.per_month)} в месяц` : "Помесячно"}</div>
+          </span>
+          <span class="price"><b>${rub(t.price)}</b>${t.stars && S.methods.stars ? `<div>${t.stars} ⭐</div>` : ""}</span>
+        </button>`).join("")}
       </div>
-
-      ${methods.length ? `<div class="section-title">Способ оплаты</div><div class="segmented">${methods.join("")}</div>` : ""}
-      <div class="spacer-pay"></div>`;
+      <p class="foot">В каждом тарифе: до ${S.max_devices} устройств, безлимитный трафик, поддержка 24/7 и творог в подарок.</p>
+      ${S.methods.stars && S.methods.card ? `<div class="cap">Оплата</div><div class="seg">
+        <button class="${ui.method === "stars" ? "on" : ""}" data-method="stars">Telegram Stars</button>
+        <button class="${ui.method === "card" ? "on" : ""}" data-method="card">Карта или СБП</button></div>` : ""}
+      <div class="pay-space"></div>`;
   }
-
   function renderPaybar() {
     const bar = $("#paybar");
-    if (ui.tab !== "plans" || !S) { bar.hidden = true; return; }
-    const t = S.tariffs.find((x) => x.key === ui.plan);
+    if (!S || ui.tab !== "plans") { bar.hidden = true; return; }
     bar.hidden = false;
-    if (ui.pendingCard) {
-      $("#paybar-inner").innerHTML = `<button class="btn primary" data-act="check-card">${icon("i-check")}Я оплатил — проверить</button>
-        <div class="note">Оплатили картой? Нажмите, чтобы активировать подписку</div>`;
+    const t = S.tariffs.find((x) => x.key === ui.plan);
+    if (ui.card) {
+      $("#paybar-in").innerHTML = `<button class="btn main" data-act="check">Я оплатил</button><div class="paynote">Нажмите после оплаты, чтобы активировать подписку</div>`;
       return;
     }
-    const label = ui.method === "stars" ? `Оплатить ${t.stars} ⭐` : `Оплатить ${rub(t.price)}`;
-    const note = ui.method === "stars" ? "Оплата внутри Telegram · звёзды списываются сразу"
-      : S.methods.card_demo ? "Демо-режим: деньги не списываются" : "Банковская карта или СБП · ЮKassa";
-    $("#paybar-inner").innerHTML = `<button class="btn gradient" data-act="pay">${label}</button><div class="note">${note}</div>`;
+    const stars = ui.method === "stars";
+    $("#paybar-in").innerHTML = `<button class="btn main" data-act="pay">Оплатить ${stars ? `${t.stars} ⭐` : rub(t.price)}</button>
+      <div class="paynote">${stars ? "Оплата звёздами внутри Telegram" : S.methods.card_demo ? "Демо-режим — деньги не списываются" : "Банковская карта или СБП"}</div>`;
   }
-
   async function pay(btn) {
     const tariff = ui.plan, method = ui.method;
     haptic("medium");
-    await withLoading(btn, async () => {
+    await busy(btn, async () => {
       const r = await api("/api/pay", { tariff, method });
-      if (r.type === "paid") { setState(r.state); showSuccess(); return; }
-      if (r.type === "url") { ui.pendingCard = { payment_id: r.payment_id, tariff }; renderPaybar(); openLink(r.url); return; }
-      if (r.type === "invoice") {
-        if (!tg || !tg.openInvoice) { openLink(r.url); return; }
+      if (r.type === "paid") { setState(r.state); haptic("success"); showDone("Оплата прошла", `Подписка активна до ${S.subscription.expires}.`); }
+      else if (r.type === "url") { ui.card = { payment_id: r.payment_id, tariff }; renderPaybar(); open(r.url); }
+      else if (r.type === "invoice") {
+        if (!tg || !tg.openInvoice) return open(r.url);
         tg.openInvoice(r.url, async (status) => {
-          if (status === "paid") { haptic("success"); await waitForActivation(); showSuccess(); }
-          else if (status === "failed") { haptic("error"); toast("Оплата не прошла", "i-lock"); }
+          if (status === "paid") { haptic("success"); await waitPaid(); showDone("Оплата прошла", `Подписка активна до ${S.subscription.expires}.`); }
+          else if (status === "failed") { haptic("error"); toast("Оплата не прошла"); }
         });
       }
-    }).catch((e) => { haptic("error"); toast(e.message, "i-lock"); });
+    });
   }
-
-  async function waitForActivation() {
+  async function waitPaid() {
     const before = S.subscription.expires;
     for (let i = 0; i < 12; i++) {
       const st = await api("/api/state").catch(() => null);
-      if (st && st.subscription.active && st.subscription.expires !== before) { setState(st); return; }
+      if (st && st.subscription.active && st.subscription.expires !== before) return setState(st);
       await new Promise((r) => setTimeout(r, 1000));
     }
     setState(await api("/api/state"));
   }
-
   async function checkCard(btn) {
-    await withLoading(btn, async () => {
-      const r = await api("/api/pay/check", ui.pendingCard);
-      if (r.paid) { ui.pendingCard = null; setState(r.state); haptic("success"); showSuccess(); }
-      else { haptic("warning"); toast("Оплата ещё не поступила", "i-calendar"); }
-    }).catch((e) => toast(e.message, "i-lock"));
+    await busy(btn, async () => {
+      const r = await api("/api/pay/check", ui.card);
+      if (!r.paid) { haptic("warning"); return toast("Оплата ещё не поступила"); }
+      ui.card = null; setState(r.state); haptic("success"); showDone("Оплата прошла", `Подписка активна до ${S.subscription.expires}.`);
+    });
   }
 
-  // ── Подключение ──
-  function renderDevices() {
+  // ── Ключ ──
+  function connect() {
     const dev = S.devices.find((d) => d.key === ui.device) || S.devices[0];
-    const iconFor = { apple: "p-apple", android: "p-android", windows: "p-windows", laptop: "p-laptop", terminal: "p-terminal" };
-    const platforms = S.devices.map((d) => `
-      <button class="platform ${d.key === dev.key ? "active" : ""}" data-device="${d.key}">${icon(iconFor[d.icon])}${esc(d.name)}</button>`).join("");
-
+    const plats = `<div class="plats">${S.devices.map((d) => `<button class="${d.key === dev.key ? "on" : ""}" data-device="${d.key}">${esc(d.name)}</button>`).join("")}</div>`;
     let body;
     if (!S.subscription.active) {
-      body = `
-        <div class="card empty mt2">
-          <div class="empty-icon bg-violet">${icon("i-lock", "lg")}</div>
-          <div class="empty-title">Нужна подписка</div>
-          <div class="empty-text">Оформите подписку${S.trial.available ? " или попробуйте бесплатно" : ""}, чтобы получить персональный ключ.</div>
-          ${S.trial.available ? `<button class="btn gradient" data-act="trial">${icon("i-gift")}Попробовать ${days(S.trial.days)} бесплатно</button><div class="mt"></div>` : ""}
-          <button class="btn ${S.trial.available ? "ghost" : "primary"}" data-go="plans">Выбрать тариф</button>
-        </div>`;
+      body = `<div class="box empty">
+        Чтобы получить ключ, нужна активная подписка.
+        <div class="gap"></div><div class="gap"></div>
+        ${S.trial.available ? `<button class="btn main" data-act="trial">Попробовать ${days(S.trial.days)} бесплатно</button><div class="gap"></div>` : ""}
+        <button class="btn ${S.trial.available ? "soft" : "main"}" data-go="plans">Выбрать тариф</button></div>`;
     } else {
-      const apps = dev.apps.map((a) => `<button class="link-row" data-link="${esc(a.url)}">${icon("i-download", "sm")}${esc(a.label)}${icon("i-chev", "sm")}</button>`).join("");
-      const keyBlock = ui.key ? `
-        <div class="card keycard mt2">
-          <div class="qr"><img src="${ui.key.qr}" alt="QR-код ключа"></div>
-          <div class="key-title">Ваш персональный ключ</div>
-          <div class="key-sub">Отсканируйте QR-код в приложении или импортируйте файл</div>
-          <div class="code">${esc(ui.key.config.replace(/^(PrivateKey\s*=\s*)(.{6}).*$/m, "$1$2••••••••••••"))}</div>
-          <div class="row-btns">
-            <button class="btn ghost" data-act="copy">${icon("i-copy", "sm")}Скопировать</button>
-            <button class="btn ghost" data-act="send">${icon("i-send", "sm")}Файлом в чат</button>
-          </div>
-        </div>` : "";
+      const k = ui.key;
       body = `
-        <div class="card steps mt">
-          <div class="step done"><div class="step-num">${icon("i-check", "sm")}</div><div><div class="step-title">Подписка активна</div><div class="step-text">До ${S.subscription.expires}</div></div></div>
-          <div class="step"><div class="step-num">2</div><div><div class="step-title">Установите приложение</div><div class="step-text">Для ${esc(dev.name)} подойдёт любое из них</div><div class="links">${apps}</div></div></div>
-          <div class="step ${ui.key ? "done" : ""}"><div class="step-num">${ui.key ? icon("i-check", "sm") : "3"}</div><div><div class="step-title">Получите ключ</div><div class="step-text">Персональный — не передавайте его другим</div>
-            ${ui.key ? "" : `<button class="btn primary" data-act="key">${icon("i-key")}Получить ключ</button>`}</div></div>
-          <div class="step"><div class="step-num">4</div><div><div class="step-title">Включите VPN</div><div class="step-text" style="margin-bottom:0">Импортируйте ключ в приложение и нажмите кнопку подключения</div></div></div>
+        <div class="cap">1. Установите приложение</div>
+        <div class="box">${dev.apps.map((a) => row("down", esc(a.label), { link: a.url })).join("")}</div>
+        <div class="cap">2. Добавьте ключ</div>
+        <div class="box">
+          ${k ? `
+            <div class="qr"><img src="${k.qr}" alt="QR-код"></div>
+            <p class="foot" style="text-align:center;margin:0 16px 12px">Отсканируйте QR-код в приложении или импортируйте ключ.</p>
+            <div class="code">${esc(k.config.replace(/^(PrivateKey\s*=\s*)(.{6}).*$/m, "$1$2••••••••••"))}</div>
+            <div class="two" style="padding:0 16px 16px">
+              <button class="btn soft" data-act="copy">${svg("copy", "s")}Скопировать</button>
+              <button class="btn soft" data-act="send">${svg("send", "s")}В чат файлом</button>
+            </div>`
+          : `<div style="padding:16px"><p class="row-sub" style="margin:0 0 14px">Ключ персональный — не передавайте его другим. Подписка до ${S.subscription.expires}.</p>
+              <button class="btn main" data-act="key">Получить ключ</button></div>`}
         </div>
-        ${keyBlock}`;
+        <div class="cap">3. Подключитесь</div>
+        <div class="box"><div class="row plain"><span class="row-main row-sub" style="margin:0">Откройте приложение и нажмите кнопку подключения. Одной подписки хватит на ${S.max_devices} устройства.</span></div></div>`;
     }
-
-    $("#screen-devices").innerHTML = `
-      ${topbar()}
-      <h1>Подключение</h1>
-      <p class="subtitle">Выберите устройство — займёт меньше минуты.</p>
-      <div class="platforms">${platforms}</div>
-      ${body}`;
+    $("#s-connect").innerHTML = `${head()}<h1>Подключение</h1><p class="lead">Выберите устройство.</p>${plats}${body}`;
   }
-
   async function getKey(btn) {
     haptic("medium");
-    await withLoading(btn, async () => {
-      ui.key = await api("/api/key");
-      S.has_key = true;
-      haptic("success");
-      renderDevices(); renderHome();
-      setTimeout(() => $(".keycard") && $(".keycard").scrollIntoView({ behavior: "smooth", block: "center" }), 80);
-    }).catch((e) => { haptic("error"); toast(e.message, "i-lock"); });
+    await busy(btn, async () => { ui.key = await api("/api/key"); S.has_key = true; haptic("success"); connect(); home(); });
   }
 
-  async function copyKey() {
-    const text = ui.key.config;
-    try { await navigator.clipboard.writeText(text); }
-    catch (e) {
-      const ta = document.createElement("textarea");
-      ta.value = text; document.body.appendChild(ta); ta.select();
-      try { document.execCommand("copy"); } catch (_) {}
-      ta.remove();
-    }
-    haptic("success"); toast("Ключ скопирован");
-  }
-
-  async function sendKey(btn) {
-    await withLoading(btn, async () => {
-      await api("/api/key/send");
-      haptic("success"); toast("Файл отправлен в чат", "i-send");
-    }).catch((e) => toast(e.message, "i-lock"));
+  // ── Друзья ──
+  function friends() {
+    const R = S.referral;
+    const status = { paid: ["paid", `+${days(R.bonus_days)}`], trial: ["trial", "Пробный период"], joined: ["joined", "Зарегистрировался"] };
+    $("#s-friends").innerHTML = `
+      ${head()}
+      <h1>Друзья</h1>
+      <p class="lead">Приглашайте друзей и продлевайте подписку бесплатно.</p>
+      <div class="box ref-hero">
+        <div class="ref-num">+${days(R.bonus_days)}</div>
+        <div class="ref-text">за каждого друга, который оформит подписку</div>
+        <div class="ref-sub">Другу — ${days(R.friend_trial_days)} бесплатно вместо ${R.base_trial_days}.</div>
+        <div class="link"><span>${esc(R.link.replace("https://", ""))}</span><button data-act="copy-link" aria-label="Скопировать">${svg("copy", "s")}</button></div>
+        <button class="btn main" data-act="share">${svg("share", "s")}Пригласить друга</button>
+      </div>
+      <div class="gap"></div>
+      <div class="box stats">
+        <div class="stat"><b>${R.invited}</b><span>приглашено</span></div>
+        <div class="stat"><b>${R.paid}</b><span>оформили</span></div>
+        <div class="stat"><b>${R.earned_days}</b><span>${plural(R.earned_days, "день", "дня", "дней")} получено</span></div>
+      </div>
+      <div class="cap">Как это работает</div>
+      <div class="box">
+        <div class="row"><span class="num">1</span><span class="row-main">Отправьте другу свою ссылку</span></div>
+        <div class="row"><span class="num">2</span><span class="row-main">Друг получает ${days(R.friend_trial_days)} бесплатно</span></div>
+        <div class="row"><span class="num">3</span><span class="row-main">Когда он оформит подписку, вам начислится +${days(R.bonus_days)}</span></div>
+      </div>
+      <div class="cap">Приглашённые</div>
+      <div class="box">${R.friends.length ? R.friends.map((f) => `
+        <div class="row"><span class="ava">${esc(initials(f.name))}</span><span class="row-main">${esc(f.name)}<div class="row-sub">${esc(f.joined.split("-").reverse().join("."))}</div></span>
+          <span class="badge ${status[f.status][0]}">${status[f.status][1]}</span></div>`).join("")
+        : `<div class="empty">Пока никого. Отправьте ссылку — друзья появятся здесь.</div>`}
+      </div>`;
   }
 
   // ── Профиль ──
-  function renderProfile() {
-    const name = [tgUser.first_name, tgUser.last_name].filter(Boolean).join(" ") || "Пользователь";
-    const initials = name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
-    const sub = S.subscription;
-    const cheese = { none: S.cheese.eligible ? "Доступен" : "От 1 месяца", pending: "Оформляется", ordered: "Заказан", delivered: "Доставлен" }[S.cheese.status] || "";
-
-    $("#screen-profile").innerHTML = `
-      ${topbar()}
-      <div class="card profile">
-        <div class="avatar">${tgUser.photo_url ? `<img src="${esc(tgUser.photo_url)}" alt="">` : esc(initials)}</div>
-        <div><div class="profile-name">${esc(name)}</div><div class="profile-sub">${tgUser.username ? "@" + esc(tgUser.username) : "Творог VPN"}</div></div>
+  function profile() {
+    const name = [me.first_name, me.last_name].filter(Boolean).join(" ") || "Пользователь";
+    const s = S.subscription;
+    const cheese = { none: S.cheese.eligible ? "Доступен" : "—", pending: "Оформляется", ordered: "Заказан", delivered: "Доставлен" }[S.cheese.status] || "—";
+    $("#s-profile").innerHTML = `
+      ${head()}
+      <div class="me"><div class="me-ava">${me.photo_url ? `<img src="${esc(me.photo_url)}" alt="">` : esc(initials(name))}</div>
+        <div class="me-name">${esc(name)}</div><div class="me-sub">${me.username ? "@" + esc(me.username) : `ID ${esc(me.id || "")}`}</div></div>
+      <div class="cap">Подписка</div>
+      <div class="box">
+        ${row("shield", "Статус", { val: s.active ? `<span style="color:var(--ok)">Активна</span>` : "Не активна" })}
+        ${row("cal", s.active ? "Действует до" : "Окончание", { val: s.expires || "—" })}
+        ${row("dev", "Устройства", { val: `до ${S.max_devices}` })}
+        ${row("hash", "ID", { val: esc(me.id || "") })}
       </div>
-
-      <div class="section-title">Подписка</div>
-      <div class="card list">
-        <div class="list-row"><div class="list-icon bg-green">${icon("i-shield")}</div><div class="list-label">Статус</div><span class="status-badge ${sub.active ? "on" : "off"}">${sub.active ? "Активна" : "Не активна"}</span></div>
-        <div class="list-row"><div class="list-icon bg-blue">${icon("i-calendar")}</div><div class="list-label">${sub.active ? "Действует до" : "Окончание"}</div><div class="list-value">${sub.expires || "—"}</div></div>
-        <div class="list-row"><div class="list-icon bg-violet">${icon("i-devices")}</div><div class="list-label">Устройства</div><div class="list-value">до ${S.max_devices}</div></div>
-        <div class="list-row"><div class="list-icon bg-gray">${icon("i-hash")}</div><div class="list-label">ID</div><div class="list-value">${esc(tgUser.id || "")}</div></div>
+      <div class="cap">Ещё</div>
+      <div class="box">
+        ${row("users", "Пригласить друга", { go: "friends", val: `+${days(S.referral.bonus_days)}` })}
+        ${row("gift", "Творог в подарок", { act: "gift", val: cheese })}
+        ${row("chat", "Поддержка", { act: "support" })}
+        ${row("bot", "Чат с ботом", { link: S.bot_url })}
       </div>
-
-      <div class="section-title">Ещё</div>
-      <div class="card list">
-        <button class="list-row" data-act="gift"><div class="list-icon bg-orange">${icon("i-gift")}</div><div class="list-label">Творог в подарок</div><div class="list-value">${cheese}</div>${icon("i-chev", "chev")}</button>
-        <button class="list-row" data-act="support"><div class="list-icon bg-teal">${icon("i-chat")}</div><div class="list-label">Поддержка</div>${icon("i-chev", "chev")}</button>
-        <button class="list-row" data-link="${esc(S.bot_url)}"><div class="list-icon bg-pink">${icon("i-bot")}</div><div class="list-label">Чат с ботом</div>${icon("i-chev", "chev")}</button>
-      </div>
-      <div class="footer">${esc(S.brand)} · быстрый и стабильный VPN${S.demo ? "<br>Демо-режим: VPN-ключи и оплата картой — демонстрационные" : ""}</div>`;
+      <p class="foot" style="text-align:center;margin-top:20px">${esc(S.brand)}${S.demo ? " · демо-режим: ключи и оплата картой демонстрационные" : ""}</p>`;
   }
 
-  // ── Творог (шторка) ──
-  function openSheet(html) {
-    $("#sheet").innerHTML = html;
-    document.body.classList.add("sheet-open");
-    if (tg && tg.BackButton) tg.BackButton.show();
-  }
-  function closeSheet() {
-    document.body.classList.remove("sheet-open");
-    if (tg && tg.BackButton) tg.BackButton.hide();
-  }
-  $("#sheet-backdrop").addEventListener("click", closeSheet);
-  if (tg && tg.BackButton) tg.BackButton.onClick(() => { if ($("#success").classList.contains("show")) hideSuccess(); else closeSheet(); });
+  // ── Шторка: творог ──
+  const sheet = (html) => { $("#sheet").innerHTML = html; document.body.classList.add("sheet-open"); tg && tg.BackButton && tg.BackButton.show(); };
+  const closeSheet = () => { document.body.classList.remove("sheet-open"); tg && tg.BackButton && tg.BackButton.hide(); };
+  $("#dim").addEventListener("click", closeSheet);
+  if (tg && tg.BackButton) tg.BackButton.onClick(() => ($("#done").classList.contains("show") ? hideDone() : closeSheet()));
 
-  async function openGift() {
+  async function gift() {
     haptic("light");
     if (!S.cheese.eligible) {
-      const done = S.cheese.status !== "none";
-      openSheet(`
-        <div class="empty">
-          <div class="empty-icon bg-orange">${icon("i-gift", "lg")}</div>
-          <div class="empty-title">${done ? "Подарок уже получен" : "Творог в подарок"}</div>
-          <div class="empty-text">${done ? "Одна упаковка на аккаунт. Спасибо, что вы с нами!" : "Оформите подписку от 1 месяца — и мы отправим вам настоящий творог в ближайший пункт выдачи Ozon."}</div>
-          ${done ? `<button class="btn ghost" data-act="close-sheet">Закрыть</button>` : `<button class="btn gradient" data-act="sheet-plans">Выбрать тариф</button>`}
-        </div>`);
-      return;
+      const got = S.cheese.status !== "none";
+      return sheet(`<h1>Творог в подарок</h1><p class="lead">${got ? "Подарок уже получен — одна упаковка на аккаунт. Спасибо, что вы с нами!" : "Оформите подписку от 1 месяца — и мы отправим вам настоящий творог в ближайший пункт выдачи Ozon."}</p>
+        ${got ? `<button class="btn soft" data-act="close">Закрыть</button>` : `<button class="btn main" data-act="to-plans">Выбрать тариф</button>`}`);
     }
-    openSheet(`<h1>Творог в подарок 🎁</h1><p class="subtitle">Выберите город — доставим в пункт выдачи Ozon.</p><div class="cities"><div class="skeleton" style="height:48px"></div><div class="skeleton" style="height:48px"></div></div>`);
+    sheet(`<h1>Творог в подарок</h1><p class="lead">Выберите город — доставим в пункт выдачи Ozon.</p><div class="cities"><div class="sk" style="height:46px"></div><div class="sk" style="height:46px"></div></div>`);
     const { cities } = await api("/api/gift/cities");
-    $("#sheet .cities").innerHTML = cities.map((c) => `<button class="city" data-city="${esc(c.id)}">${esc(c.name)}</button>`).join("");
+    $("#sheet .cities").innerHTML = cities.map((c) => `<button data-city="${esc(c.id)}">${esc(c.name)}</button>`).join("");
   }
-
-  async function openCity(cityId) {
+  async function city(id) {
     haptic("select");
-    const r = await api(`/api/gift/pvz?city=${encodeURIComponent(cityId)}`);
-    $("#sheet").innerHTML = `
-      <h1>${esc(r.city)}</h1><p class="subtitle">Выберите пункт выдачи Ozon.</p>
-      <div class="card list">${r.points.map((p) => `
-        <button class="list-row" data-pvz="${esc(p.id)}" data-pvz-city="${esc(cityId)}"><div class="list-icon bg-orange">${icon("i-pin")}</div>
-          <div class="list-label"><b>${esc(p.name)}</b><div class="tile-sub">${esc(p.address)}</div></div>${icon("i-chev", "chev")}</button>`).join("")}
-      </div>
-      <button class="btn ghost mt2" data-act="gift">‹ Другой город</button>`;
+    const r = await api(`/api/gift/pvz?city=${encodeURIComponent(id)}`);
+    $("#sheet").innerHTML = `<h1>${esc(r.city)}</h1><p class="lead">Выберите пункт выдачи.</p>
+      <div class="box">${r.points.map((p) => `<button class="row" data-pvz="${esc(p.id)}" data-pvz-city="${esc(id)}"><span class="ico">${svg("pin")}</span><span class="row-main">${esc(p.name)}<div class="row-sub">${esc(p.address)}</div></span>${svg("chevr", "chev")}</button>`).join("")}</div>
+      <div class="gap"></div><button class="btn soft" data-act="gift">Другой город</button>`;
+  }
+  async function order(btn, cityId, pvz) {
+    await busy(btn, async () => {
+      const r = await api("/api/gift/order", { city: cityId, pvz });
+      setState(r.state); haptic("success"); closeSheet();
+      showDone("Заказ принят", "Мы оформим доставку в ближайшее время. Приятного аппетита!", false);
+    });
   }
 
-  async function orderCheese(btn, city, pvz) {
-    await withLoading(btn, async () => {
-      const r = await api("/api/gift/order", { city, pvz });
-      setState(r.state);
-      haptic("success");
-      $("#sheet").innerHTML = `
-        <div class="empty">
-          <div class="success-mark" style="width:84px;height:84px;margin:0 auto 16px">${icon("i-check")}</div>
-          <div class="empty-title">Заказ принят!</div>
-          <div class="empty-text">Мы оформим доставку в ближайшее время. Приятного аппетита! 😋</div>
-          <button class="btn primary" data-act="close-sheet">Отлично</button>
-        </div>`;
-    }).catch((e) => toast(e.message, "i-lock"));
+  // ── Результат ──
+  function showDone(title, text, withActions = true) {
+    $("#done").innerHTML = `<div class="done-ico">${svg("check")}</div><h2>${esc(title)}</h2><p>${esc(text)}</p>
+      ${withActions ? `<button class="btn main" data-act="done-connect">Подключить устройство</button>${S.cheese.eligible ? `<button class="btn soft" data-act="done-gift">Получить творог</button>` : ""}` : ""}
+      <button class="btn soft" data-act="done-home" style="margin-top:8px">${withActions ? "На главную" : "Готово"}</button>`;
+    $("#done").classList.add("show"); tg && tg.BackButton && tg.BackButton.show();
   }
+  const hideDone = () => { $("#done").classList.remove("show"); tg && tg.BackButton && tg.BackButton.hide(); };
 
-  // ── Успех ──
-  function showSuccess(title = "Оплата прошла!", text) {
-    const sub = S.subscription;
-    $("#success").innerHTML = `
-      <div class="success-mark">${icon("i-check")}</div>
-      <h2>${esc(title)}</h2>
-      <p>${esc(text || `Подписка активна до ${sub.expires}. Осталось подключить устройство — это займёт минуту.`)}</p>
-      <button class="btn gradient" data-act="success-devices">${icon("i-key")}Подключить устройство</button>
-      ${S.cheese.eligible ? `<button class="btn soft" data-act="success-gift">${icon("i-gift")}Получить творог</button>` : ""}
-      <button class="btn ghost" data-act="success-close" style="margin-top:10px">На главную</button>`;
-    $("#success").classList.add("show");
-    if (tg && tg.BackButton) tg.BackButton.show();
-  }
-  function hideSuccess() {
-    $("#success").classList.remove("show");
-    if (tg && tg.BackButton) tg.BackButton.hide();
-  }
-
-  async function startTrial(btn) {
+  async function trial(btn) {
     haptic("medium");
-    await withLoading(btn, async () => {
-      const r = await api("/api/trial");
-      setState(r.state);
-      haptic("success");
-      showSuccess("Пробный период активирован!", `${days(S.trial.days)} бесплатного доступа — до ${S.subscription.expires}. Подключите устройство.`);
-    }).catch((e) => { haptic("error"); toast(e.message, "i-lock"); });
+    await busy(btn, async () => {
+      const r = await api("/api/trial"); setState(r.state); haptic("success");
+      showDone("Пробный период включён", `${days(S.subscription.days_left)} бесплатного доступа — до ${S.subscription.expires}.`);
+    });
   }
 
-  // ── Обработка нажатий ──
-  document.addEventListener("click", (ev) => {
-    const el = ev.target.closest("[data-go],[data-act],[data-plan],[data-method],[data-device],[data-link],[data-city],[data-pvz]");
+  document.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-go],[data-act],[data-plan],[data-method],[data-device],[data-link],[data-city],[data-pvz]");
     if (!el) return;
     const d = el.dataset;
     if (d.go) return go(d.go);
-    if (d.plan) { ui.plan = d.plan; ui.pendingCard = null; haptic("select"); renderPlans(); renderPaybar(); return; }
-    if (d.method) { ui.method = d.method; ui.pendingCard = null; haptic("select"); renderPlans(); renderPaybar(); return; }
-    if (d.device) { ui.device = d.device; haptic("select"); renderDevices(); return; }
-    if (d.link) { haptic("light"); return openLink(d.link); }
-    if (d.city) return openCity(d.city).catch((e) => toast(e.message, "i-lock"));
-    if (d.pvz) return orderCheese(el, d.pvzCity, d.pvz);
+    if (d.plan) { ui.plan = d.plan; ui.card = null; haptic("select"); plans(); return renderPaybar(); }
+    if (d.method) { ui.method = d.method; ui.card = null; haptic("select"); plans(); return renderPaybar(); }
+    if (d.device) { ui.device = d.device; haptic("select"); return connect(); }
+    if (d.link) { haptic("light"); return open(d.link); }
+    if (d.city) return city(d.city).catch((x) => toast(x.message));
+    if (d.pvz) return order(el, d.pvzCity, d.pvz);
     switch (d.act) {
-      case "trial": return startTrial(el);
+      case "trial": return trial(el);
       case "pay": return pay(el);
-      case "check-card": return checkCard(el);
+      case "check": return checkCard(el);
       case "key": return getKey(el);
-      case "copy": return copyKey();
-      case "send": return sendKey(el);
-      case "gift": return openGift().catch((e) => toast(e.message, "i-lock"));
-      case "support": haptic("light"); return openLink(S.support_url);
-      case "close-sheet": return closeSheet();
-      case "sheet-plans": closeSheet(); return go("plans");
-      case "success-devices": hideSuccess(); return go("devices");
-      case "success-gift": hideSuccess(); return openGift();
-      case "success-close": hideSuccess(); return go("home");
+      case "copy": return copy(ui.key.config, "Ключ скопирован");
+      case "send": return busy(el, async () => { await api("/api/key/send"); haptic("success"); toast("Ключ отправлен в чат"); });
+      case "copy-link": return copy(S.referral.link, "Ссылка скопирована");
+      case "share": haptic("medium"); return open(S.referral.share_url);
+      case "gift": return gift().catch((x) => toast(x.message));
+      case "support": haptic("light"); return open(S.support_url);
+      case "close": return closeSheet();
+      case "to-plans": closeSheet(); return go("plans");
+      case "done-connect": hideDone(); return go("connect");
+      case "done-gift": hideDone(); return gift();
+      case "done-home": hideDone(); return go("home");
     }
   });
 
-  // ── Запуск ──
-  function showError(title, text, button) {
+  function fail(title, text, extra = "") {
     $("#loading").hidden = true;
-    $("#screen-error").innerHTML = `
-      <div class="center-screen"><div class="empty">
-        <div class="logo" style="width:72px;height:72px;border-radius:22px;margin:0 auto 18px">${icon("i-lock", "lg")}</div>
-        <div class="empty-title">${esc(title)}</div>
-        <div class="empty-text">${esc(text)}</div>
-        ${button || ""}
-      </div></div>`;
-    $("#screen-error").classList.add("active");
+    $("#s-error").innerHTML = `<div style="min-height:80vh;display:grid;place-items:center;text-align:center"><div>
+      <div class="mark" style="width:64px;height:64px;border-radius:18px;font-size:34px;margin:0 auto 16px">Т</div>
+      <h1>${esc(title)}</h1><p class="lead">${esc(text)}</p>${extra}</div></div>`;
+    $("#s-error").classList.add("active");
   }
 
-  async function boot() {
+  (async () => {
     if (tg) {
-      tg.ready();
-      tg.expand();
+      tg.ready(); tg.expand();
       try { tg.setHeaderColor("secondary_bg_color"); tg.setBackgroundColor("secondary_bg_color"); } catch (e) {}
       try { tg.disableVerticalSwipes && tg.disableVerticalSwipes(); } catch (e) {}
     }
-    if (!initData) {
-      showError("Откройте в Telegram", "Это приложение работает внутри Telegram — откройте его через бота.");
-      return;
-    }
-    try {
-      setState(await api("/api/state"));
-    } catch (e) {
-      showError("Не удалось загрузить", e.message, `<button class="btn primary" onclick="location.reload()">Повторить</button>`);
-    }
-  }
-  boot();
+    const hash = location.hash.replace("#", "");
+    if (["home", "plans", "connect", "friends", "profile"].includes(hash)) ui.tab = hash;
+    if (!initData) return fail("Откройте в Telegram", "Приложение работает внутри Telegram — откройте его через бота.");
+    try { setState(await api("/api/state")); }
+    catch (e) { fail("Не удалось загрузить", e.message, `<button class="btn main" onclick="location.reload()">Повторить</button>`); }
+  })();
 })();
 </script>
 </body>

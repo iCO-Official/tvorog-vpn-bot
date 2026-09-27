@@ -27,7 +27,8 @@ from config import (
     WELCOME_TEXT, HELP_TEXT, INFO_TEXT,
     CONFIG_INSTRUCTION_TEXT, DATABASE_PATH, TRIAL_DAYS, MAX_DEVICES,
     INSTALL_IPHONE_TEXT, INSTALL_ANDROID_TEXT, INSTALL_WINDOWS_TEXT, INSTALL_MAC_TEXT,
-    INSTALL_LINUX_TEXT, SUPPORT_URL, STARS_ENABLED, CRYPTO_ASSETS, WEBAPP_URL, WEBAPP_PORT
+    INSTALL_LINUX_TEXT, SUPPORT_URL, STARS_ENABLED, CRYPTO_ASSETS, WEBAPP_URL, WEBAPP_PORT,
+    REFERRAL_BONUS_DAYS,
 )
 from database import (
     init_db, get_user, create_user,
@@ -38,7 +39,8 @@ from database import (
 )
 from vpn_manager import save_client_config, add_peer, remove_peer, WireGuardError
 from subscription import (
-    trial_available, record_payment, start_trial, build_client_config, qr_png
+    trial_available, trial_days_for, record_payment, start_trial, build_client_config, qr_png,
+    attach_referrer, referral_info,
 )
 from payments import (
     create_payment_link, check_payment_status, card_payments_enabled,
@@ -144,17 +146,23 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = []
     if WEBAPP_URL:
         keyboard.append([InlineKeyboardButton("📱 Открыть приложение", web_app=WebAppInfo(WEBAPP_URL))])
+    trial_days = trial_days_for(user)
     if trial_available(user):
-        keyboard.append([btn(f"🎁 Попробовать {plural_days(TRIAL_DAYS)} бесплатно", "claim_gift")])
+        keyboard.append([btn(f"🎁 Попробовать {plural_days(trial_days)} бесплатно", "claim_gift")])
     keyboard += [
         [btn("🔑 Подключить устройство", "connect")],
         [btn("💳 Тарифы", "buy"), btn("👤 Кабинет", "personal_account")],
-        [btn("ℹ️ О сервисе", "info"), url_btn("💬 Поддержка", SUPPORT_URL)],
+        [btn("🤝 Пригласить друга", "referral"), url_btn("💬 Поддержка", SUPPORT_URL)],
+        [btn("ℹ️ О сервисе", "info")],
     ]
     text = WELCOME_TEXT.strip()
     if not trial_available(user):
         # Строка-призыв про пробный период не нужна, если кнопки уже нет
         text = "\n".join(line for line in text.splitlines() if not line.startswith("✨")).strip()
+    elif trial_days != TRIAL_DAYS:
+        # Друг пришёл по приглашению — пробный период длиннее
+        text = text.replace(f"{TRIAL_DAYS} дня бесплатно", f"{plural_days(trial_days)} бесплатно")
+        text += f"\n\n🤝 <b>Вы пришли по приглашению</b> — пробный период {plural_days(trial_days)} вместо {TRIAL_DAYS}."
     await show(update, context, text, keyboard)
 
 
@@ -233,7 +241,7 @@ async def show_no_subscription(update: Update, context: ContextTypes.DEFAULT_TYP
     user = get_user(update.effective_user.id)
     keyboard = []
     if trial_available(user):
-        keyboard.append([btn(f"🎁 Попробовать {plural_days(TRIAL_DAYS)} бесплатно", "claim_gift")])
+        keyboard.append([btn(f"🎁 Попробовать {plural_days(trial_days_for(user))} бесплатно", "claim_gift")])
     keyboard += [[btn("💳 Выбрать тариф", "buy")], MENU_ROW]
     await show(update, context,
         "<b>Подписка не активна</b>\n\n"
@@ -267,8 +275,28 @@ async def show_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard.append([btn("💳 Продлить подписку" if user["expires_at"] else "💳 Оформить подписку", "buy")])
     if is_cheese_eligible(user_id):
         keyboard.append([btn("🎁 Получить творог", "gift")])
+    keyboard.append([btn("🤝 Пригласить друга", "referral")])
     keyboard.append(MENU_ROW)
     await show(update, context, "\n".join(lines), keyboard)
+
+
+async def show_referral(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = register(update)
+    info = referral_info(context.bot.username, user["user_id"])
+    text = (
+        "<b>🤝 Приглашайте друзей</b>\n\n"
+        f"За каждого друга, который оформит подписку, — <b>+{plural_days(info['bonus_days'])}</b> к вашей подписке.\n"
+        f"Другу — <b>{plural_days(info['friend_trial_days'])}</b> бесплатно вместо {TRIAL_DAYS}.\n\n"
+        f"Ваша ссылка:\n<code>{info['link']}</code>\n\n"
+        f"Приглашено: <b>{info['invited']}</b>\n"
+        f"Оформили подписку: <b>{info['paid']}</b>\n"
+        f"Получено: <b>{plural_days(info['earned_days'])}</b>"
+    )
+    keyboard = [[url_btn("📤 Поделиться ссылкой", info["share_url"])]]
+    if WEBAPP_URL:
+        keyboard.append([InlineKeyboardButton("📱 Статистика в приложении", web_app=WebAppInfo(WEBAPP_URL + "#friends"))])
+    keyboard.append(MENU_ROW)
+    await show(update, context, text, keyboard)
 
 
 async def show_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -318,11 +346,11 @@ async def claim_trial(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    start_trial(user_id)
+    trial_days = start_trial(user_id)
     user = get_user(user_id)
     await show_devices(update, context,
         f"<b>🎁 Пробный период активирован</b>\n\n"
-        f"{plural_days(TRIAL_DAYS).capitalize()} бесплатного доступа — до <b>{format_date(user['expires_at'])}</b>."
+        f"{plural_days(trial_days).capitalize()} бесплатного доступа — до <b>{format_date(user['expires_at'])}</b>."
     )
 
 
@@ -438,7 +466,9 @@ async def complete_payment(update: Update, context: ContextTypes.DEFAULT_TYPE,
                            user_id: int, tariff_key: str, payment_id: str):
     """Активировать подписку после оплаты любым способом и показать экран успеха"""
     tariff = TARIFFS[tariff_key]
-    record_payment(user_id, tariff_key, payment_id)
+    referrer_id = record_payment(user_id, tariff_key, payment_id)
+    if referrer_id:
+        await notify_referral_bonus(context.bot, referrer_id)
 
     user = get_user(user_id)
     keyboard = [[btn("🔑 Подключить устройство", "connect")]]
@@ -452,6 +482,20 @@ async def complete_payment(update: Update, context: ContextTypes.DEFAULT_TYPE,
         keyboard.append([btn("🎁 Получить творог", "gift")])
     keyboard.append(MENU_ROW)
     await show(update, context, text, keyboard)
+
+
+async def notify_referral_bonus(bot, referrer_id: int):
+    """Сообщить пригласившему, что ему начислены бонусные дни"""
+    referrer = get_user(referrer_id)
+    try:
+        await bot.send_message(referrer_id,
+            f"<b>🤝 +{plural_days(REFERRAL_BONUS_DAYS)} к подписке</b>\n\n"
+            "Ваш друг оформил подписку — спасибо за рекомендацию!\n"
+            f"Подписка действует до <b>{format_date(referrer['expires_at'])}</b>.",
+            reply_markup=InlineKeyboardMarkup([[btn("🤝 Пригласить ещё", "referral")]])
+        )
+    except Exception as e:
+        logger.warning("Не удалось уведомить пригласившего %s: %s", referrer_id, e)
 
 
 async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -664,7 +708,23 @@ async def confirm_cheese_order(update: Update, context: ContextTypes.DEFAULT_TYP
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("waiting_for_city", None)
     context.user_data.pop("waiting_for_address", None)
+    register(update)
+    if context.args:
+        referrer_id = attach_referrer(update.effective_user.id, context.args[0])
+        if referrer_id:
+            name = html.escape(update.effective_user.first_name or "Друг")
+            try:
+                await context.bot.send_message(referrer_id,
+                    f"<b>🤝 Новый друг по вашей ссылке: {name}</b>\n\n"
+                    f"Когда друг оформит подписку, вы получите +{plural_days(REFERRAL_BONUS_DAYS)}.",
+                )
+            except Exception as e:
+                logger.warning("Не удалось уведомить пригласившего %s: %s", referrer_id, e)
     await show_main_menu(update, context)
+
+
+async def invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await show_referral(update, context)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -779,6 +839,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_vpn_key(update, context)
     elif data in ("personal_account", "status"):
         await show_account(update, context)
+    elif data == "referral":
+        await show_referral(update, context)
     elif data == "info":
         await show_info(update, context)
     elif data == "help":
@@ -962,6 +1024,7 @@ async def post_init(application: Application):
             BotCommand("buy", "Тарифы и оплата"),
             BotCommand("status", "Личный кабинет"),
             BotCommand("gift", "Творог в подарок"),
+            BotCommand("invite", "Пригласить друга"),
             BotCommand("help", "Поддержка"),
             BotCommand("paysupport", "Вопросы по оплате"),
         ])
@@ -1058,6 +1121,7 @@ def main():
     application.add_handler(CommandHandler("users", users_list))
     application.add_handler(CommandHandler("paysupport", paysupport))
     application.add_handler(CommandHandler("app", app_command))
+    application.add_handler(CommandHandler("invite", invite))
 
     # Оплата звёздами Telegram
     application.add_handler(PreCheckoutQueryHandler(precheckout))

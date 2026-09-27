@@ -32,6 +32,12 @@ WG_SERVER_PUBLIC_KEY = os.environ.get("WG_SERVER_PUBLIC_KEY", "").strip()
 # VPN-ключи генерируются, но не подключаются; оплата засчитывается без денег.
 DEMO_MODE = os.environ.get("DEMO_MODE", "false").lower() == "true"
 
+# Реферальная программа
+# Пригласившему — дней за каждого друга, который оформит платную подписку
+REFERRAL_BONUS_DAYS = int(os.environ.get("REFERRAL_BONUS_DAYS", "7"))
+# Другу — дополнительные дни к пробному периоду (3 + 4 = 7 дней)
+REFERRAL_FRIEND_BONUS_DAYS = int(os.environ.get("REFERRAL_FRIEND_BONUS_DAYS", "4"))
+
 # Мини-приложение внутри Telegram. WEBAPP_URL — публичный https-адрес, где открыт порт WEBAPP_PORT.
 # Пусто — приложение выключено.
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "").strip().rstrip("/")

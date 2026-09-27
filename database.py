@@ -21,15 +21,22 @@ def init_db():
             delivery_address TEXT,
             cheese_order_status TEXT DEFAULT 'none',
             cheese_order_date TEXT,
-            wg_ip TEXT
+            wg_ip TEXT,
+            referrer_id INTEGER,
+            referral_rewarded INTEGER DEFAULT 0
         )
     ''')
 
     # Миграция старых баз: добавляем недостающие колонки
     cursor.execute("PRAGMA table_info(users)")
     columns = {row[1] for row in cursor.fetchall()}
-    if "wg_ip" not in columns:
-        cursor.execute("ALTER TABLE users ADD COLUMN wg_ip TEXT")
+    for column, ddl in [
+        ("wg_ip", "TEXT"),
+        ("referrer_id", "INTEGER"),
+        ("referral_rewarded", "INTEGER DEFAULT 0"),
+    ]:
+        if column not in columns:
+            cursor.execute(f"ALTER TABLE users ADD COLUMN {column} {ddl}")
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS payments (
@@ -310,3 +317,41 @@ def get_wg_peers(active: bool) -> list:
     peers = [{"user_id": r[0], "public_key": r[1], "ip": r[2]} for r in cursor.fetchall()]
     conn.close()
     return peers
+
+
+# ───────────────────────── Рефералы ─────────────────────────
+
+def set_referrer(user_id: int, referrer_id: int) -> bool:
+    """Привязать нового пользователя к пригласившему. Только один раз и только до первой подписки."""
+    if user_id == referrer_id:
+        return False
+    user, referrer = get_user(user_id), get_user(referrer_id)
+    if not user or not referrer or user["referrer_id"] or user["expires_at"]:
+        return False
+    update_user(user_id, referrer_id=referrer_id)
+    return True
+
+
+def get_referral_stats(user_id: int) -> dict:
+    """Статистика приглашений пользователя"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    rows = conn.execute(
+        "SELECT username, created_at, referral_rewarded, expires_at FROM users "
+        "WHERE referrer_id = ? ORDER BY created_at DESC",
+        (user_id,)
+    ).fetchall()
+    conn.close()
+    friends = []
+    for username, created_at, rewarded, expires_at in rows:
+        if rewarded:
+            status = "paid"
+        elif expires_at:
+            status = "trial"
+        else:
+            status = "joined"
+        friends.append({"name": username or "Без имени", "joined": (created_at or "")[:10], "status": status})
+    return {
+        "invited": len(friends),
+        "paid": sum(1 for f in friends if f["status"] == "paid"),
+        "friends": friends,
+    }

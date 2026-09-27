@@ -5,9 +5,15 @@ import base64
 import io
 import sqlite3
 
-from config import TARIFFS, TRIAL_DAYS, DATABASE_PATH
+from urllib.parse import quote
+
+from config import (
+    TARIFFS, TRIAL_DAYS, DATABASE_PATH, BOT_NAME,
+    REFERRAL_BONUS_DAYS, REFERRAL_FRIEND_BONUS_DAYS,
+)
 from database import (
-    get_user, update_user, activate_subscription, add_payment, get_used_wg_ips
+    get_user, update_user, activate_subscription, add_payment, get_used_wg_ips,
+    set_referrer, get_referral_stats,
 )
 from vpn_manager import generate_wg_keys, get_next_ip, add_peer, create_client_config
 
@@ -17,16 +23,81 @@ def trial_available(user) -> bool:
     return not user or not user["expires_at"]
 
 
+def trial_days_for(user) -> int:
+    """Пробный период: приглашённым друзьям — дольше"""
+    if user and user["referrer_id"]:
+        return TRIAL_DAYS + REFERRAL_FRIEND_BONUS_DAYS
+    return TRIAL_DAYS
+
+
 def record_payment(user_id: int, tariff_key: str, payment_id: str):
-    """Активировать подписку после оплаты и записать платёж"""
+    """Активировать подписку после оплаты и записать платёж.
+    Если это первая оплата приглашённого друга — начислить бонус пригласившему.
+    Возвращает ID пригласившего, которому начислен бонус, иначе None."""
     tariff = TARIFFS[tariff_key]
     activate_subscription(user_id, tariff["days"])
     add_payment(user_id, tariff["price"], tariff_key, payment_id)
 
+    user = get_user(user_id)
+    if tariff["price"] and user["referrer_id"] and not user["referral_rewarded"]:
+        update_user(user_id, referral_rewarded=1)
+        if get_user(user["referrer_id"]):
+            activate_subscription(user["referrer_id"], REFERRAL_BONUS_DAYS)
+            return user["referrer_id"]
+    return None
 
-def start_trial(user_id: int):
-    activate_subscription(user_id, TRIAL_DAYS)
+
+def start_trial(user_id: int) -> int:
+    """Включить пробный период, вернуть его длительность в днях"""
+    days = trial_days_for(get_user(user_id))
+    activate_subscription(user_id, days)
     add_payment(user_id, 0, "trial", "trial")
+    return days
+
+
+# ───────────────────────── Рефералы ─────────────────────────
+
+REF_PREFIX = "ref_"
+
+
+def parse_referrer(start_param: str):
+    """ID пригласившего из параметра ссылки ref_123"""
+    if start_param and start_param.startswith(REF_PREFIX) and start_param[len(REF_PREFIX):].isdigit():
+        return int(start_param[len(REF_PREFIX):])
+    return None
+
+
+def attach_referrer(user_id: int, start_param: str):
+    """Привязать нового пользователя к пригласившему. Возвращает ID пригласившего или None."""
+    referrer_id = parse_referrer(start_param)
+    if referrer_id and set_referrer(user_id, referrer_id):
+        return referrer_id
+    return None
+
+
+def referral_link(bot_username: str, user_id: int) -> str:
+    return f"https://t.me/{bot_username}?start={REF_PREFIX}{user_id}"
+
+
+def referral_share_url(bot_username: str, user_id: int) -> str:
+    text = (
+        f"Пользуюсь {BOT_NAME} — быстрый VPN прямо в Telegram. "
+        f"По моей ссылке — {TRIAL_DAYS + REFERRAL_FRIEND_BONUS_DAYS} дней бесплатно:"
+    )
+    return f"https://t.me/share/url?url={quote(referral_link(bot_username, user_id))}&text={quote(text)}"
+
+
+def referral_info(bot_username: str, user_id: int) -> dict:
+    stats = get_referral_stats(user_id)
+    return {
+        **stats,
+        "link": referral_link(bot_username, user_id),
+        "share_url": referral_share_url(bot_username, user_id),
+        "bonus_days": REFERRAL_BONUS_DAYS,
+        "friend_trial_days": TRIAL_DAYS + REFERRAL_FRIEND_BONUS_DAYS,
+        "base_trial_days": TRIAL_DAYS,
+        "earned_days": stats["paid"] * REFERRAL_BONUS_DAYS,
+    }
 
 
 def current_period_days(user_id: int) -> int:
