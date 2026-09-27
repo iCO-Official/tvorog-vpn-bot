@@ -32,6 +32,11 @@ WG_SERVER_PUBLIC_KEY = os.environ.get("WG_SERVER_PUBLIC_KEY", "").strip()
 # VPN-ключи генерируются, но не подключаются; оплата засчитывается без денег.
 DEMO_MODE = os.environ.get("DEMO_MODE", "false").lower() == "true"
 
+# Мини-приложение внутри Telegram. WEBAPP_URL — публичный https-адрес, где открыт порт WEBAPP_PORT.
+# Пусто — приложение выключено.
+WEBAPP_URL = os.environ.get("WEBAPP_URL", "").strip().rstrip("/")
+WEBAPP_PORT = int(os.environ.get("WEBAPP_PORT", "8080"))
+
 # Бот поддержки (отдельный бот от @BotFather)
 SUPPORT_BOT_TOKEN = os.environ.get("SUPPORT_BOT_TOKEN", "").strip()
 # Username бота поддержки (или аккаунта поддержки) — на него ведут кнопки «Поддержка»

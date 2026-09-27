@@ -21,6 +21,19 @@ if [ ! -f .env ]; then
     echo "DEMO_MODE=true" >> .env
 fi
 
+# Мини-приложение в GitHub Codespaces: публичный https-адрес порта 8080
+if [ -n "$CODESPACE_NAME" ] && ! grep -q "^WEBAPP_URL=..*" .env; then
+    export WEBAPP_URL="https://${CODESPACE_NAME}-8080.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}"
+    echo "📱 Мини-приложение: $WEBAPP_URL"
+    # Делаем порт публичным, чтобы Telegram смог открыть приложение
+    ( for i in $(seq 1 20); do
+        sleep 3
+        if gh codespace ports visibility 8080:public -c "$CODESPACE_NAME" >/dev/null 2>&1; then
+            echo "✅ Порт 8080 открыт для Telegram"; break
+        fi
+      done ) &
+fi
+
 if grep -q "^SUPPORT_BOT_TOKEN=..*" .env; then
     echo "💬 Запускаю бота поддержки..."
     ./venv/bin/python support_bot.py &

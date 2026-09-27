@@ -89,6 +89,21 @@ cd /opt/tvorog-vpn-bot && bash update_bot.sh
 
 После изменения `.env`: `systemctl restart tvorog-vpn-bot`.
 
+## Мини-приложение внутри Telegram (необязательно)
+
+Приложению нужен адрес **https** — для этого нужен домен (например, `app.tvorog-vpn.ru`), направленный на IP сервера (A-запись у регистратора домена).
+
+```bash
+apt-get install -y caddy
+echo 'app.tvorog-vpn.ru {
+    reverse_proxy 127.0.0.1:8080
+}' > /etc/caddy/Caddyfile
+systemctl restart caddy
+ufw allow 80/tcp && ufw allow 443/tcp
+```
+
+Затем в `.env`: `WEBAPP_URL=https://app.tvorog-vpn.ru` и `systemctl restart tvorog-vpn-bot`. Caddy сам получит сертификат. В боте появятся кнопка «📱 Открыть приложение» и кнопка «Приложение» рядом с полем ввода.
+
 ## Бот поддержки (необязательно)
 
 1. В @BotFather создайте второго бота: `/newbot`, например `tvorog_support_bot`. Скопируйте токен.

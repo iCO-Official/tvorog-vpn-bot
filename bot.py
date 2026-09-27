@@ -1,5 +1,4 @@
 import html
-import io
 import logging
 import os
 import sqlite3
@@ -7,7 +6,7 @@ import sys
 from datetime import datetime
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile,
-    BotCommand, LabeledPrice, LinkPreviewOptions
+    BotCommand, LabeledPrice, LinkPreviewOptions, MenuButtonWebApp, WebAppInfo
 )
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, Conflict, InvalidToken
@@ -28,18 +27,18 @@ from config import (
     WELCOME_TEXT, HELP_TEXT, INFO_TEXT,
     CONFIG_INSTRUCTION_TEXT, DATABASE_PATH, TRIAL_DAYS, MAX_DEVICES,
     INSTALL_IPHONE_TEXT, INSTALL_ANDROID_TEXT, INSTALL_WINDOWS_TEXT, INSTALL_MAC_TEXT,
-    INSTALL_LINUX_TEXT, SUPPORT_URL, STARS_ENABLED, CRYPTO_ASSETS
+    INSTALL_LINUX_TEXT, SUPPORT_URL, STARS_ENABLED, CRYPTO_ASSETS, WEBAPP_URL, WEBAPP_PORT
 )
 from database import (
     init_db, get_user, create_user,
     activate_subscription, is_subscription_active,
-    add_payment, get_user_stats, update_user,
+    get_user_stats, update_user,
     is_cheese_eligible, get_pending_cheese_orders, update_cheese_order,
-    get_used_wg_ips, get_wg_peers
+    get_wg_peers
 )
-from vpn_manager import (
-    generate_wg_keys, create_client_config, save_client_config,
-    get_next_ip, add_peer, remove_peer, WireGuardError
+from vpn_manager import save_client_config, add_peer, remove_peer, WireGuardError
+from subscription import (
+    trial_available, record_payment, start_trial, build_client_config, qr_png
 )
 from payments import (
     create_payment_link, check_payment_status, card_payments_enabled,
@@ -103,11 +102,6 @@ def days_left(iso: str) -> int:
     return max((datetime.fromisoformat(iso) - datetime.now()).days, 0)
 
 
-def trial_available(user) -> bool:
-    """Пробный период доступен только тем, у кого ещё никогда не было подписки"""
-    return not user or not user["expires_at"]
-
-
 def register(update: Update):
     """Создать пользователя, если его ещё нет, и вернуть его"""
     tg_user = update.effective_user
@@ -148,6 +142,8 @@ async def notify_admin(context: ContextTypes.DEFAULT_TYPE, text: str):
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = register(update)
     keyboard = []
+    if WEBAPP_URL:
+        keyboard.append([InlineKeyboardButton("📱 Открыть приложение", web_app=WebAppInfo(WEBAPP_URL))])
     if trial_available(user):
         keyboard.append([btn(f"🎁 Попробовать {plural_days(TRIAL_DAYS)} бесплатно", "claim_gift")])
     keyboard += [
@@ -322,8 +318,7 @@ async def claim_trial(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    activate_subscription(user_id, TRIAL_DAYS)
-    add_payment(user_id, 0, "trial", "trial")
+    start_trial(user_id)
     user = get_user(user_id)
     await show_devices(update, context,
         f"<b>🎁 Пробный период активирован</b>\n\n"
@@ -443,8 +438,7 @@ async def complete_payment(update: Update, context: ContextTypes.DEFAULT_TYPE,
                            user_id: int, tariff_key: str, payment_id: str):
     """Активировать подписку после оплаты любым способом и показать экран успеха"""
     tariff = TARIFFS[tariff_key]
-    activate_subscription(user_id, tariff["days"])
-    add_payment(user_id, tariff["price"], tariff_key, payment_id)
+    record_payment(user_id, tariff_key, payment_id)
 
     user = get_user(user_id)
     keyboard = [[btn("🔑 Подключить устройство", "connect")]]
@@ -539,19 +533,6 @@ async def paysupport(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ───────────────────────── VPN-ключ ─────────────────────────
 
-def ensure_vpn_peer(user_id: int):
-    """Выдать пользователю ключи и IP, добавить его на сервер WireGuard"""
-    user = get_user(user_id)
-    if not user["wg_private_key"]:
-        private_key, public_key = generate_wg_keys()
-        update_user(user_id, wg_private_key=private_key, wg_public_key=public_key)
-    if not user["wg_ip"]:
-        update_user(user_id, wg_ip=get_next_ip(get_used_wg_ips()))
-    user = get_user(user_id)
-    add_peer(user["wg_public_key"], user["wg_ip"])
-    return user
-
-
 async def send_vpn_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отправить пользователю ключ WireGuard (файл + QR-код). Ключ — всегда того, кто нажал."""
     user_id = update.effective_user.id
@@ -563,8 +544,7 @@ async def send_vpn_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        user = ensure_vpn_peer(user_id)
-        config = create_client_config(user["wg_private_key"], user["wg_ip"])
+        config = build_client_config(user_id)
     except WireGuardError as e:
         logger.error("Ошибка выдачи VPN-ключа для %s: %s", user_id, e)
         await show(update, context,
@@ -588,11 +568,7 @@ async def send_vpn_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = InlineKeyboardMarkup([[btn("📖 Как подключиться", "instruction")], MENU_ROW])
     try:
-        import qrcode
-        buf = io.BytesIO()
-        qrcode.make(config).save(buf, format="PNG")
-        buf.seek(0)
-        await context.bot.send_photo(chat_id, photo=buf,
+        await context.bot.send_photo(chat_id, photo=qr_png(config),
             caption="📷 Или отсканируйте этот QR-код в приложении на телефоне.",
             reply_markup=keyboard
         )
@@ -992,6 +968,17 @@ async def post_init(application: Application):
     except Exception as e:
         logger.warning("Не удалось установить меню команд: %s", e)
 
+    if WEBAPP_URL:
+        from webapp import start_webapp
+        application.bot_data["webapp_runner"] = await start_webapp(application, WEBAPP_PORT)
+        try:
+            await application.bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp("Приложение", WebAppInfo(WEBAPP_URL))
+            )
+        except Exception as e:
+            logger.warning("Не удалось установить кнопку приложения: %s", e)
+        logger.info("📱 Мини-приложение: %s (порт %s)", WEBAPP_URL, WEBAPP_PORT)
+
     restored = 0
     for peer in get_wg_peers(active=True):
         try:
@@ -1001,6 +988,25 @@ async def post_init(application: Application):
             logger.error("Не удалось восстановить пир %s: %s", peer["user_id"], e)
             break
     logger.info("Восстановлено VPN-подключений: %s", restored)
+
+
+async def post_shutdown(application: Application):
+    runner = application.bot_data.get("webapp_runner")
+    if runner:
+        await runner.cleanup()
+
+
+async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/app — открыть мини-приложение"""
+    if not WEBAPP_URL:
+        await show_main_menu(update, context)
+        return
+    await update.message.reply_text(
+        "<b>📱 Приложение Творог VPN</b>\n\nПодписка, оплата и ключи — в одном месте.",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("📱 Открыть приложение", web_app=WebAppInfo(WEBAPP_URL))
+        ]])
+    )
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
@@ -1033,6 +1039,7 @@ def main():
         .defaults(defaults)
         .persistence(persistence)
         .post_init(post_init)
+        .post_shutdown(post_shutdown)
         .build()
     )
 
@@ -1050,6 +1057,7 @@ def main():
     application.add_handler(CommandHandler("order_cheese", order_cheese))
     application.add_handler(CommandHandler("users", users_list))
     application.add_handler(CommandHandler("paysupport", paysupport))
+    application.add_handler(CommandHandler("app", app_command))
 
     # Оплата звёздами Telegram
     application.add_handler(PreCheckoutQueryHandler(precheckout))
