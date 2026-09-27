@@ -1,42 +1,55 @@
+import html
 import logging
+import math
+import os
 import sqlite3
+import sys
 from datetime import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+from telegram import (
+    Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile,
+    BotCommand, LabeledPrice, LinkPreviewOptions, MenuButtonWebApp, WebAppInfo
+)
+from telegram.constants import ParseMode
+from telegram.error import BadRequest, Conflict, InvalidToken
 from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
-    PreCheckoutQueryHandler,
+    Defaults,
     MessageHandler,
+    PreCheckoutQueryHandler,
+    PicklePersistence,
     filters,
     ContextTypes
 )
 
 from config import (
-    BOT_TOKEN, TARIFFS, SERVERS, ADMIN_ID, BOT_NAME,
-    WELCOME_TEXT, HELP_TEXT, TARIFF_TEXT, SUCCESS_PAYMENT_TEXT,
-    CONFIG_INSTRUCTION_TEXT, DATABASE_PATH,
-    INSTALL_IPHONE_TEXT, INSTALL_ANDROID_TEXT, INSTALL_WINDOWS_TEXT, INSTALL_MAC_TEXT
+    BOT_TOKEN, TARIFFS, SERVERS, ADMIN_ID, BOT_NAME, DEMO_MODE,
+    WELCOME_TEXT, HELP_TEXT, INFO_TEXT,
+    CONFIG_INSTRUCTION_TEXT, DATABASE_PATH, TRIAL_DAYS, MAX_DEVICES,
+    INSTALL_IPHONE_TEXT, INSTALL_ANDROID_TEXT, INSTALL_WINDOWS_TEXT, INSTALL_MAC_TEXT,
+    INSTALL_LINUX_TEXT, SUPPORT_URL, STARS_ENABLED, CRYPTO_ASSETS, WEBAPP_URL, WEBAPP_PORT,
+    REFERRAL_BONUS_DAYS,
 )
 from database import (
     init_db, get_user, create_user,
     activate_subscription, is_subscription_active,
-    add_payment, get_user_stats, update_user,
-    is_cheese_eligible, get_pending_cheese_orders, update_cheese_order
+    get_user_stats, update_user,
+    is_cheese_eligible, get_pending_cheese_orders, update_cheese_order,
+    get_wg_peers
 )
-from vpn_manager import generate_wg_keys, create_client_config, save_client_config
+from vpn_manager import save_client_config, add_peer, remove_peer, WireGuardError
+from subscription import (
+    trial_available, trial_days_for, record_payment, start_trial, build_client_config, qr_png,
+    attach_referrer, referral_info, reset_client_key,
+)
 from payments import (
-    create_payment_link, check_payment_status,
-    get_tariff_info, format_subscription_status,
-    format_payment_message
+    create_payment_link, check_payment_status, card_payments_enabled,
+    crypto_payments_enabled, create_crypto_invoice, check_crypto_invoice
 )
-from ozon_helper import (
-    generate_ozon_link, format_cheese_order_message,
-    format_cheese_delivery_message, OZON_PRODUCT_NAME, OZON_PRODUCT_PRICE
-)
+from ozon_helper import generate_ozon_link, OZON_PRODUCT_NAME, OZON_PRODUCT_PRICE
 from pvz_finder import (
-    get_city_keyboard, get_pvz_keyboard, get_city_name,
-    get_pvz_by_id, format_order_message, POPULAR_CITIES
+    get_city_name, get_pvz_list, get_pvz_by_id, format_order_message, POPULAR_CITIES
 )
 
 # Настройка логирования
@@ -44,694 +57,832 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-# Главное меню клавиатура
-def get_main_menu_keyboard():
-    """Клавиатура главного меню"""
-    return [
-        [InlineKeyboardButton("🔑 Подключиться", callback_data="connect")],
-        [InlineKeyboardButton("🏠 Личный кабинет", callback_data="personal_account"),
-         InlineKeyboardButton("ℹ️ Информация", callback_data="info")]
+# Как часто проверять истёкшие подписки и отключать их от VPN (секунды)
+EXPIRED_PEERS_CHECK_INTERVAL = 3600
+
+
+DEVICES = {
+    "iphone": ("🍎 iPhone / iPad", INSTALL_IPHONE_TEXT),
+    "android": ("🤖 Android", INSTALL_ANDROID_TEXT),
+    "windows": ("💻 Windows", INSTALL_WINDOWS_TEXT),
+    "mac": ("🖥 macOS", INSTALL_MAC_TEXT),
+    "linux": ("🐧 Linux", INSTALL_LINUX_TEXT),
+}
+
+# Тарифы с подарком-творогом
+CHEESE_TARIFFS = ["month", "quarter", "year"]
+
+
+# ───────────────────────── Вспомогательное ─────────────────────────
+
+def btn(text: str, data: str) -> InlineKeyboardButton:
+    return InlineKeyboardButton(text, callback_data=data)
+
+
+def url_btn(text: str, url: str) -> InlineKeyboardButton:
+    return InlineKeyboardButton(text, url=url)
+
+
+MENU_ROW = [btn("‹ Главное меню", "back_to_menu")]
+
+
+def plural_days(n: int) -> str:
+    if n % 10 == 1 and n % 100 != 11:
+        return f"{n} день"
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return f"{n} дня"
+    return f"{n} дней"
+
+
+def format_date(iso: str) -> str:
+    return datetime.fromisoformat(iso).strftime("%d.%m.%Y")
+
+
+def days_left(iso: str) -> int:
+    """Сколько дней осталось (неполный день считается целым — как в приложении)"""
+    seconds = (datetime.fromisoformat(iso) - datetime.now()).total_seconds()
+    return max(math.ceil(seconds / 86400), 0)
+
+
+def register(update: Update):
+    """Создать пользователя, если его ещё нет, и вернуть его"""
+    tg_user = update.effective_user
+    create_user(tg_user.id, tg_user.username or tg_user.first_name)
+    return get_user(tg_user.id)
+
+
+async def show(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, keyboard=None):
+    """Показать экран. Нажата кнопка — меняем текущее сообщение, команда — отправляем новое."""
+    markup = InlineKeyboardMarkup(keyboard) if keyboard else None
+    query = update.callback_query
+    if query:
+        try:
+            await query.edit_message_text(text, reply_markup=markup)
+            return
+        except BadRequest as e:
+            if "not modified" in str(e).lower():
+                return
+            # Сообщение с файлом или фото редактировать нельзя — отправим новое
+        await context.bot.send_message(query.message.chat_id, text, reply_markup=markup)
+    else:
+        await update.effective_message.reply_text(text, reply_markup=markup)
+
+
+async def notify_admin(context: ContextTypes.DEFAULT_TYPE, text: str):
+    """Отправить сообщение админу, не ломая сценарий пользователя при ошибке"""
+    if not ADMIN_ID:
+        logger.warning("ADMIN_ID не задан, уведомление админу не отправлено: %s", text)
+        return
+    try:
+        await context.bot.send_message(chat_id=ADMIN_ID, text=text)
+    except Exception as e:
+        logger.error("Не удалось отправить сообщение админу %s: %s", ADMIN_ID, e)
+
+
+# ───────────────────────── Экраны ─────────────────────────
+
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = register(update)
+    keyboard = []
+    if WEBAPP_URL:
+        keyboard.append([InlineKeyboardButton("📱 Открыть приложение", web_app=WebAppInfo(WEBAPP_URL))])
+    trial_days = trial_days_for(user)
+    if trial_available(user):
+        keyboard.append([btn(f"🎁 Попробовать {plural_days(trial_days)} бесплатно", "claim_gift")])
+    keyboard += [
+        [btn("🔑 Подключить устройство", "connect")],
+        [btn("💳 Тарифы", "buy"), btn("👤 Кабинет", "personal_account")],
+        [btn("🤝 Пригласить друга", "referral"), url_btn("💬 Поддержка", SUPPORT_URL)],
+        [btn("ℹ️ О сервисе", "info")],
     ]
+    text = WELCOME_TEXT.strip()
+    if not trial_available(user):
+        # Строка-призыв про пробный период не нужна, если кнопки уже нет
+        text = "\n".join(line for line in text.splitlines() if not line.startswith("✨")).strip()
+    elif trial_days != TRIAL_DAYS:
+        # Друг пришёл по приглашению — пробный период длиннее
+        text = text.replace(f"{TRIAL_DAYS} дня бесплатно", f"{plural_days(trial_days)} бесплатно")
+        text += f"\n\n🤝 <b>Вы пришли по приглашению</b> — пробный период {plural_days(trial_days)} вместо {TRIAL_DAYS}."
+    await show(update, context, text, keyboard)
 
-# Клавиатура выбора устройства
-def get_device_keyboard():
-    """Клавиатура выбора устройства"""
-    return [
-        [InlineKeyboardButton("🤖 Android", callback_data="install_android"),
-         InlineKeyboardButton("🍎 iPhone/iPad", callback_data="install_iphone")],
-        [InlineKeyboardButton("💻 Windows", callback_data="install_windows"),
-         InlineKeyboardButton("🖥 MacOS", callback_data="install_mac")],
-        [InlineKeyboardButton("🐧 Linux", callback_data="install_linux")],
-        [InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_menu")]
-    ]
 
-# Команда /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /start"""
-    user = update.effective_user
-    db_user = create_user(user.id, user.username or user.first_name)
+def payment_methods_text() -> str:
+    """Какие способы оплаты сейчас включены — для текста тарифов"""
+    methods = []
+    if card_payments_enabled():
+        methods.append("карта, СБП")
+    if STARS_ENABLED:
+        methods.append("Telegram Stars ⭐")
+    if crypto_payments_enabled():
+        methods.append("криптовалюта")
+    if len(methods) > 1:
+        return ", ".join(methods[:-1]) + " или " + methods[-1]
+    return methods[0] if methods else "временно недоступна"
 
-    keyboard = [
-        [InlineKeyboardButton("🎁 Забрать подарок", callback_data="claim_gift")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_text(
-        WELCOME_TEXT,
-        parse_mode='HTML',
-        reply_markup=reply_markup
+def tariff_discount(key: str) -> int:
+    """Скидка тарифа относительно помесячной оплаты, %"""
+    month = TARIFFS["month"]
+    tariff = TARIFFS[key]
+    full_price = month["price"] / month["days"] * tariff["days"]
+    return round((1 - tariff["price"] / full_price) * 100)
+
+
+async def show_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "<b>💳 Тарифы</b>\n\n"
+        "В каждый тариф входит:\n"
+        f"• до {MAX_DEVICES} устройств на одну подписку\n"
+        "• безлимитный трафик и высокая скорость\n"
+        "• поддержка 24/7\n"
+        "• 🎁 творог в подарок\n\n"
+        f"Оплата: {payment_methods_text()}.\n\n"
+        "Выберите срок подписки:"
     )
-
-# Команда /help
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /help"""
-    keyboard = [
-        [InlineKeyboardButton("💬 Написать в поддержку", url="https://t.me/tvorog_support")],
-        [InlineKeyboardButton("🏠 В меню", callback_data="back_to_menu")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(HELP_TEXT, parse_mode='HTML', reply_markup=reply_markup)
-
-# Команда /buy
-async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /buy"""
     keyboard = []
     for key, tariff in TARIFFS.items():
         if tariff["price"] == 0:
-            text = f"🆓 {tariff['name']} — бесплатно"
-        else:
-            text = f"💳 {tariff['name']} — {tariff['price']} ₽"
-        keyboard.append([InlineKeyboardButton(text, callback_data=f"buy_{key}")])
+            continue
+        label = f"{tariff['name']} · {tariff['price']} ₽"
+        if STARS_ENABLED and tariff.get("stars"):
+            label += f" / {tariff['stars']} ⭐"
+        discount = tariff_discount(key)
+        if discount >= 5:
+            label += f"  (−{discount}%)"
+        keyboard.append([btn(label, f"buy_{key}")])
+    keyboard.append(MENU_ROW)
+    await show(update, context, text, keyboard)
 
-    keyboard.append([InlineKeyboardButton("🔙 Назад в меню", callback_data="back_to_menu")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_text(TARIFF_TEXT, parse_mode='HTML', reply_markup=reply_markup)
+async def show_devices(update: Update, context: ContextTypes.DEFAULT_TYPE, title: str = None):
+    text = (title or "<b>🔑 Подключение</b>") + (
+        "\n\nВыберите устройство — пришлём короткую инструкцию и персональный ключ."
+    )
+    names = {key: name for key, (name, _) in DEVICES.items()}
+    keyboard = [
+        [btn(names["iphone"], "install_iphone"), btn(names["android"], "install_android")],
+        [btn(names["windows"], "install_windows"), btn(names["mac"], "install_mac")],
+        [btn(names["linux"], "install_linux")],
+        MENU_ROW,
+    ]
+    await show(update, context, text, keyboard)
 
-# Команда /status
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /status"""
+
+async def show_install(update: Update, context: ContextTypes.DEFAULT_TYPE, device: str):
+    _, text = DEVICES[device]
+    keyboard = [
+        [btn("🔑 Получить ключ", f"get_config_{device}")],
+        [btn("‹ Назад", "connect")],
+    ]
+    await show(update, context, text.strip(), keyboard)
+
+
+async def show_no_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(update.effective_user.id)
-    if user:
-        await update.message.reply_text(format_subscription_status(user), parse_mode='HTML')
-    else:
-        await update.message.reply_text("❌ Ты ещё не зарегистрирован. Используй /start")
-
-# Команда /servers
-async def servers(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /servers"""
     keyboard = []
-    for server_id, server in SERVERS.items():
-        keyboard.append([InlineKeyboardButton(
-            f"{server['country']} {server['name']}",
-            callback_data=f"server_{server_id}"
-        )])
-    keyboard.append([InlineKeyboardButton("🔙 Назад в меню", callback_data="back_to_menu")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("🌍 <b>Выбери сервер:</b>", parse_mode='HTML', reply_markup=reply_markup)
-
-# Команда /gift — получить творог
-async def gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /gift"""
-    user_id = update.effective_user.id
-    user = get_user(user_id)
-
-    if not user:
-        await update.message.reply_text("❌ Сначала зарегистрируйся через /start")
-        return
-
-    if not is_cheese_eligible(user_id):
-        if user["cheese_order_status"] != "none":
-            await update.message.reply_text("🔒 Ты уже получил творог в подарок!\nОдна упаковка на аккаунт 🎁")
-        else:
-            await update.message.reply_text(
-                "🔒 <b>Творог в подарок!</b>\n\n"
-                "Этот подарок только для тех, кто купил подписку от 1 месяца.\n\n"
-                "Купи подписку через /buy и получи настоящий творог домой! 🎁",
-                parse_mode='HTML'
-            )
-        return
-
-    context.user_data["waiting_for_address"] = True
-    await update.message.reply_text(
-        "🔒 <b>Поздравляю! Ты получаешь творог в подарок!</b>\n\n"
-        "Напиши свой адрес для доставки:\n\n"
-        "📝 <b>Формат:</b>\nГород, улица, дом, квартира\n\n"
-        "Пример: Москва, ул. Пушкина, д. 10, кв. 5",
-        parse_mode='HTML'
+    if trial_available(user):
+        keyboard.append([btn(f"🎁 Попробовать {plural_days(trial_days_for(user))} бесплатно", "claim_gift")])
+    keyboard += [[btn("💳 Выбрать тариф", "buy")], MENU_ROW]
+    await show(update, context,
+        "<b>Подписка не активна</b>\n\n"
+        "Чтобы получить ключ, оформите подписку"
+        + (" или попробуйте бесплатно." if trial_available(user) else "."),
+        keyboard
     )
 
-# Обработка текстовых сообщений (для адреса или города)
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка текстовых сообщений"""
-    # Если пользователь вводит город вручную
-    if context.user_data.get("waiting_for_city"):
-        city_name = update.message.text
-        context.user_data["waiting_for_city"] = False
 
-        # Показываем сообщение что город принят
-        await update.message.reply_text(
-            f"🏙️ Город: <b>{city_name}</b>\n\n"
-            f"📝 Напиши адрес пункта выдачи Ozon:\n\n"
-            f"Пример:\n"
-            f"Ozon Волгоград, ул. Ленина, д. 48",
-            parse_mode='HTML'
+async def show_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = register(update)
+    user_id = user["user_id"]
+    active = is_subscription_active(user_id)
+
+    lines = ["<b>👤 Личный кабинет</b>", "", f"ID: <code>{user_id}</code>"]
+    if active:
+        lines += [
+            "Подписка: ✅ активна",
+            f"Действует до: <b>{format_date(user['expires_at'])}</b> "
+            f"(осталось {plural_days(days_left(user['expires_at']))})",
+        ]
+    elif user["expires_at"]:
+        lines.append(f"Подписка: ❌ закончилась {format_date(user['expires_at'])}")
+    else:
+        lines.append("Подписка: ❌ не оформлена")
+    lines.append(f"Устройства: до {MAX_DEVICES}")
+
+    keyboard = []
+    if active:
+        keyboard.append([btn("🔑 Подключить устройство", "connect")])
+        if user["wg_public_key"]:
+            keyboard.append([btn("🔄 Перевыпустить ключ", "reset_key")])
+    keyboard.append([btn("💳 Продлить подписку" if user["expires_at"] else "💳 Оформить подписку", "buy")])
+    if is_cheese_eligible(user_id):
+        keyboard.append([btn("🎁 Получить творог", "gift")])
+    keyboard.append([btn("🤝 Пригласить друга", "referral")])
+    keyboard.append(MENU_ROW)
+    await show(update, context, "\n".join(lines), keyboard)
+
+
+async def show_referral(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = register(update)
+    info = referral_info(context.bot.username, user["user_id"])
+    text = (
+        "<b>🤝 Приглашайте друзей</b>\n\n"
+        f"За каждого друга, который оформит подписку, — <b>+{plural_days(info['bonus_days'])}</b> к вашей подписке.\n"
+        f"Другу — <b>{plural_days(info['friend_trial_days'])}</b> бесплатно вместо {TRIAL_DAYS}.\n\n"
+        f"Ваша ссылка:\n<code>{info['link']}</code>\n\n"
+        f"Приглашено: <b>{info['invited']}</b>\n"
+        f"Оформили подписку: <b>{info['paid']}</b>\n"
+        f"Получено: <b>{plural_days(info['earned_days'])}</b>"
+    )
+    keyboard = [[url_btn("📤 Поделиться ссылкой", info["share_url"])]]
+    if WEBAPP_URL:
+        keyboard.append([InlineKeyboardButton("📱 Статистика в приложении", web_app=WebAppInfo(WEBAPP_URL + "#friends"))])
+    keyboard.append(MENU_ROW)
+    await show(update, context, text, keyboard)
+
+
+async def show_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [btn("📖 Как подключиться", "instruction")],
+        [url_btn("💬 Поддержка", SUPPORT_URL)],
+        MENU_ROW,
+    ]
+    await show(update, context, INFO_TEXT.strip(), keyboard)
+
+
+async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [[url_btn("💬 Написать в поддержку", SUPPORT_URL)], MENU_ROW]
+    await show(update, context, HELP_TEXT.strip(), keyboard)
+
+
+async def show_instruction(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [[btn("🔑 Подключить устройство", "connect")], MENU_ROW]
+    await show(update, context, CONFIG_INSTRUCTION_TEXT.strip(), keyboard)
+
+
+async def show_servers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lines = ["<b>🌍 Серверы</b>", ""]
+    for server in SERVERS.values():
+        lines.append(f"• {server['name']} — {server['country']}")
+    lines += ["", "Сервер подбирается автоматически при подключении."]
+    await show(update, context, "\n".join(lines), [[btn("🔑 Подключить устройство", "connect")], MENU_ROW])
+
+
+# ───────────────────────── Пробный период и оплата ─────────────────────────
+
+async def claim_trial(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = register(update)
+    user_id = user["user_id"]
+
+    if is_subscription_active(user_id):
+        await show_devices(update, context,
+            f"<b>✅ Подписка уже активна</b>\n\nДействует до <b>{format_date(user['expires_at'])}</b>."
         )
-        context.user_data["waiting_for_address"] = True
         return
 
-    # Если пользователь вводит адрес пункта выдачи
+    if not trial_available(user):
+        await show(update, context,
+            "<b>Пробный период уже использован</b>\n\n"
+            "Оформите подписку, чтобы продолжить пользоваться VPN.",
+            [[btn("💳 Выбрать тариф", "buy")], MENU_ROW]
+        )
+        return
+
+    trial_days = start_trial(user_id)
+    user = get_user(user_id)
+    await show_devices(update, context,
+        f"<b>🎁 Пробный период активирован</b>\n\n"
+        f"{plural_days(trial_days).capitalize()} бесплатного доступа — до <b>{format_date(user['expires_at'])}</b>."
+    )
+
+
+def order_summary(tariff_key: str) -> str:
+    tariff = TARIFFS[tariff_key]
+    text = (
+        "<b>🧾 Оформление подписки</b>\n\n"
+        f"Тариф: <b>{tariff['name']}</b>\n"
+        f"Срок: {plural_days(tariff['days'])}\n"
+        f"Стоимость: <b>{tariff['price']} ₽</b>"
+    )
+    if STARS_ENABLED and tariff.get("stars"):
+        text += f" или <b>{tariff['stars']} ⭐</b>"
+    if tariff_key in CHEESE_TARIFFS:
+        text += "\n🎁 После оплаты — творог в подарок."
+    return text
+
+
+async def show_payment_methods(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff_key: str):
+    register(update)
+    tariff = TARIFFS[tariff_key]
+    keyboard = []
+    if card_payments_enabled():
+        keyboard.append([btn(f"💳 Карта или СБП · {tariff['price']} ₽", f"paycard_{tariff_key}")])
+    if STARS_ENABLED and tariff.get("stars"):
+        keyboard.append([btn(f"⭐ Telegram Stars · {tariff['stars']} ⭐", f"paystars_{tariff_key}")])
+    if crypto_payments_enabled():
+        keyboard.append([btn(f"🪙 Криптовалюта · {tariff['price']} ₽", f"paycrypto_{tariff_key}")])
+    keyboard.append([btn("‹ Назад к тарифам", "buy")])
+
+    text = order_summary(tariff_key) + "\n\nВыберите способ оплаты:"
+    if len(keyboard) == 1:
+        text = order_summary(tariff_key) + "\n\n⚠️ Оплата временно недоступна. Напишите в поддержку."
+        keyboard.insert(0, [url_btn("💬 Поддержка", SUPPORT_URL)])
+    await show(update, context, text, keyboard)
+
+
+async def payment_error(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff_key: str):
+    await show(update, context,
+        "<b>⚠️ Не удалось создать счёт</b>\n\n"
+        "Попробуйте другой способ оплаты или напишите в поддержку.",
+        [[btn("‹ Способы оплаты", f"buy_{tariff_key}")], [url_btn("💬 Поддержка", SUPPORT_URL)]]
+    )
+
+
+async def pay_card(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff_key: str):
+    """Карта / СБП через ЮKassa (в демо-режиме — без списания)"""
+    tariff = TARIFFS[tariff_key]
+    payment = await create_payment_link(tariff_key, update.effective_user.id)
+    if not payment:
+        await payment_error(update, context, tariff_key)
+        return
+
+    context.user_data["pending_payment"] = {
+        "provider": "yookassa", "payment_id": payment["payment_id"], "tariff": tariff_key
+    }
+    text = order_summary(tariff_key) + "\n\n💳 Оплата банковской картой или через СБП."
+    if payment["payment_id"].startswith("demo-"):
+        text += "\n\n<i>Демо-режим: деньги не списываются.</i>"
+        keyboard = [[btn(f"💳 Оплатить {tariff['price']} ₽", f"check_payment_{tariff_key}")]]
+    else:
+        text += "\nПосле оплаты вернитесь сюда и нажмите «Я оплатил»."
+        keyboard = [
+            [url_btn(f"💳 Оплатить {tariff['price']} ₽", payment["confirmation_url"])],
+            [btn("✅ Я оплатил", f"check_payment_{tariff_key}")],
+        ]
+    keyboard.append([btn("‹ Способы оплаты", f"buy_{tariff_key}")])
+    await show(update, context, text, keyboard)
+
+
+async def pay_crypto(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff_key: str):
+    """Криптовалюта через @CryptoBot"""
+    tariff = TARIFFS[tariff_key]
+    payment = await create_crypto_invoice(tariff_key, update.effective_user.id)
+    if not payment:
+        await payment_error(update, context, tariff_key)
+        return
+
+    context.user_data["pending_payment"] = {
+        "provider": "crypto", "payment_id": payment["payment_id"], "tariff": tariff_key
+    }
+    await show(update, context,
+        order_summary(tariff_key) + "\n\n"
+        f"🪙 Оплата криптовалютой ({CRYPTO_ASSETS.replace(',', ', ')}) через @CryptoBot "
+        "по текущему курсу. Счёт действует 1 час.\n"
+        "После оплаты вернитесь сюда и нажмите «Я оплатил».",
+        [
+            [url_btn(f"🪙 Оплатить {tariff['price']} ₽ в CryptoBot", payment["confirmation_url"])],
+            [btn("✅ Я оплатил", f"check_payment_{tariff_key}")],
+            [btn("‹ Способы оплаты", f"buy_{tariff_key}")],
+        ]
+    )
+
+
+async def pay_stars(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff_key: str):
+    """Звёзды Telegram: встроенное окно оплаты"""
+    tariff = TARIFFS[tariff_key]
+    user_id = update.effective_user.id
+    await context.bot.send_invoice(
+        chat_id=update.effective_chat.id,
+        title=f"{BOT_NAME} — {tariff['name']}",
+        description=(
+            f"Подписка на {plural_days(tariff['days'])}: до {MAX_DEVICES} устройств, безлимитный трафик."
+            + (" 🎁 Творог в подарок!" if tariff_key in CHEESE_TARIFFS else "")
+        ),
+        payload=f"stars:{tariff_key}:{user_id}",
+        currency="XTR",
+        prices=[LabeledPrice(tariff["name"], tariff["stars"])],
+    )
+
+
+async def complete_payment(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                           user_id: int, tariff_key: str, payment_id: str):
+    """Активировать подписку после оплаты любым способом и показать экран успеха"""
+    tariff = TARIFFS[tariff_key]
+    referrer_id = record_payment(user_id, tariff_key, payment_id)
+    if referrer_id:
+        await notify_referral_bonus(context.bot, referrer_id)
+
+    user = get_user(user_id)
+    keyboard = [[btn("🔑 Подключить устройство", "connect")]]
+    text = (
+        "<b>✅ Оплата прошла успешно</b>\n\n"
+        f"Подписка «{tariff['name']}» активна до <b>{format_date(user['expires_at'])}</b>.\n\n"
+        "Подключите устройство — это займёт минуту."
+    )
+    if is_cheese_eligible(user_id):
+        text += "\n\n🎁 А ещё вам положен творог в подарок!"
+        keyboard.append([btn("🎁 Получить творог", "gift")])
+    keyboard.append(MENU_ROW)
+    await show(update, context, text, keyboard)
+
+
+async def notify_referral_bonus(bot, referrer_id: int):
+    """Сообщить пригласившему, что ему начислены бонусные дни"""
+    referrer = get_user(referrer_id)
+    try:
+        await bot.send_message(referrer_id,
+            f"<b>🤝 +{plural_days(REFERRAL_BONUS_DAYS)} к подписке</b>\n\n"
+            "Ваш друг оформил подписку — спасибо за рекомендацию!\n"
+            f"Подписка действует до <b>{format_date(referrer['expires_at'])}</b>.",
+            reply_markup=InlineKeyboardMarkup([[btn("🤝 Пригласить ещё", "referral")]])
+        )
+    except Exception as e:
+        logger.warning("Не удалось уведомить пригласившего %s: %s", referrer_id, e)
+
+
+async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Кнопка «Я оплатил» для карты/СБП и криптовалюты"""
+    query = update.callback_query
+    user_id = query.from_user.id
+    pending = context.user_data.get("pending_payment")
+
+    if not pending or not pending.get("payment_id"):
+        await query.answer("Счёт устарел. Оформите подписку заново.", show_alert=True)
+        await show_tariffs(update, context)
+        return
+
+    # Тариф берём из созданного платежа, а не из кнопки — её можно подделать
+    tariff_key = pending["tariff"]
+    if pending.get("provider") == "crypto":
+        payment_status = await check_crypto_invoice(pending["payment_id"])
+    else:
+        payment_status = await check_payment_status(pending["payment_id"])
+    owner = payment_status.get("metadata", {}).get("user_id")
+
+    if not payment_status["paid"]:
+        await query.answer("Оплата ещё не поступила. Попробуйте через минуту.", show_alert=True)
+        return
+
+    if owner not in (None, str(user_id)):
+        logger.warning("Платёж %s принадлежит другому пользователю", pending["payment_id"])
+        context.user_data.pop("pending_payment", None)
+        await query.answer("Платёж не найден. Оформите подписку заново.", show_alert=True)
+        return
+
+    await query.answer("Оплата получена!")
+    context.user_data.pop("pending_payment", None)
+    payment_id = pending["payment_id"]
+    if pending.get("provider") == "crypto":
+        payment_id = f"crypto:{payment_id}"
+    await complete_payment(update, context, user_id, tariff_key, payment_id)
+
+
+async def precheckout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Telegram спрашивает перед списанием звёзд — проверяем счёт"""
+    query = update.pre_checkout_query
+    try:
+        kind, tariff_key, user_id = query.invoice_payload.split(":")
+        valid = (
+            kind == "stars"
+            and tariff_key in TARIFFS
+            and int(user_id) == query.from_user.id
+            and query.currency == "XTR"
+            and query.total_amount == TARIFFS[tariff_key]["stars"]
+        )
+    except ValueError:
+        valid = False
+    if valid:
+        await query.answer(ok=True)
+    else:
+        await query.answer(ok=False, error_message="Счёт устарел. Оформите подписку заново через /buy")
+
+
+async def successful_stars_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    payment = update.message.successful_payment
+    _, tariff_key, _ = payment.invoice_payload.split(":")
+    user_id = update.effective_user.id
+    register(update)
+    logger.info("Оплата звёздами: %s ⭐ от %s за %s", payment.total_amount, user_id, tariff_key)
+    await complete_payment(update, context, user_id, tariff_key,
+                           f"stars:{payment.telegram_payment_charge_id}")
+
+
+async def paysupport(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/paysupport — обязательная для оплаты звёздами команда"""
+    await show(update, context,
+        "<b>💬 Вопросы по оплате</b>\n\n"
+        "Если с оплатой что-то пошло не так или вы хотите вернуть звёзды — напишите в поддержку, "
+        "укажите дату оплаты и тариф. Мы ответим и поможем.",
+        [[url_btn("💬 Написать в поддержку", SUPPORT_URL)], MENU_ROW]
+    )
+
+
+# ───────────────────────── VPN-ключ ─────────────────────────
+
+async def send_vpn_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отправить пользователю ключ WireGuard (файл + QR-код). Ключ — всегда того, кто нажал."""
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    register(update)
+
+    if not is_subscription_active(user_id):
+        await show_no_subscription(update, context)
+        return
+
+    try:
+        config = build_client_config(user_id)
+    except WireGuardError as e:
+        logger.error("Ошибка выдачи VPN-ключа для %s: %s", user_id, e)
+        await show(update, context,
+            "<b>⚠️ Не удалось создать ключ</b>\n\n"
+            "Мы уже знаем о проблеме. Попробуйте чуть позже или напишите в поддержку.",
+            [[url_btn("💬 Поддержка", SUPPORT_URL)], MENU_ROW]
+        )
+        await notify_admin(context, f"⚠️ Ошибка выдачи VPN-ключа пользователю {user_id}:\n<code>{html.escape(str(e))}</code>")
+        return
+
+    path = save_client_config(user_id, config)
+    with open(path, "rb") as f:
+        await context.bot.send_document(chat_id,
+            document=InputFile(f, filename="TvorogVPN.conf"),
+            caption=(
+                "<b>🔑 Ваш ключ Творог VPN</b>\n\n"
+                "Откройте файл и импортируйте его в приложение.\n"
+                "<i>Не пересылайте ключ другим людям.</i>"
+            )
+        )
+
+    keyboard = InlineKeyboardMarkup([[btn("📖 Как подключиться", "instruction")], MENU_ROW])
+    try:
+        await context.bot.send_photo(chat_id, photo=qr_png(config),
+            caption="📷 Или отсканируйте этот QR-код в приложении на телефоне.",
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        logger.warning("Не удалось отправить QR-код: %s", e)
+        await context.bot.send_message(chat_id, "✅ Ключ отправлен выше.", reply_markup=keyboard)
+
+
+# ───────────────────────── Творог в подарок ─────────────────────────
+
+def city_keyboard():
+    cities = list(POPULAR_CITIES.items())[:12]
+    keyboard = [
+        [btn(name, f"city_{city_id}") for city_id, name in cities[i:i + 2]]
+        for i in range(0, len(cities), 2)
+    ]
+    keyboard += [[btn("📍 Другой город", "city_other")], MENU_ROW]
+    return keyboard
+
+
+async def show_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = register(update)
+    if is_cheese_eligible(user["user_id"]):
+        await show(update, context,
+            "<b>🎁 Творог в подарок</b>\n\n"
+            "Выберите город — доставим в пункт выдачи Ozon:",
+            city_keyboard()
+        )
+    elif user["cheese_order_status"] != "none":
+        await show(update, context,
+            "<b>🎁 Творог в подарок</b>\n\n"
+            "Вы уже получили подарок — одна упаковка на аккаунт. Спасибо, что вы с нами!",
+            [MENU_ROW]
+        )
+    else:
+        await show(update, context,
+            "<b>🎁 Творог в подарок</b>\n\n"
+            "Оформите подписку от 1 месяца — и мы отправим вам настоящий творог "
+            "в ближайший пункт выдачи Ozon.",
+            [[btn("💳 Выбрать тариф", "buy")], MENU_ROW]
+        )
+
+
+async def show_city(update: Update, context: ContextTypes.DEFAULT_TYPE, city_id: str):
+    if city_id == "other":
+        context.user_data["waiting_for_city"] = True
+        await show(update, context,
+            "<b>📍 Другой город</b>\n\nНапишите название вашего города одним сообщением.",
+            [[btn("‹ К списку городов", "back_to_cities")]]
+        )
+        return
+    keyboard = [
+        [btn(f"{pvz['name']} · {pvz['address']}", f"pvz_{city_id}_{pvz['id']}")]
+        for pvz in get_pvz_list(city_id)
+    ]
+    keyboard.append([btn("‹ К списку городов", "back_to_cities")])
+    await show(update, context,
+        f"<b>🏙 {get_city_name(city_id)}</b>\n\nВыберите пункт выдачи Ozon:",
+        keyboard
+    )
+
+
+async def confirm_cheese_order(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
+    # city_id может содержать "_" (nizhny_novgorod), поэтому режем справа
+    city_id, pvz_id = data[len("pvz_"):].rsplit("_", 1)
+    user_id = update.effective_user.id
+    if not is_cheese_eligible(user_id):
+        await show_gift(update, context)
+        return
+
+    pvz = get_pvz_by_id(city_id, pvz_id)
+    if not pvz:
+        await show_city(update, context, city_id)
+        return
+
+    user = get_user(user_id)
+    city_name = get_city_name(city_id)
+    username = html.escape(user["username"] or "Без username")
+    await notify_admin(context, format_order_message(username, user_id, city_id, pvz_id))
+    update_user(user_id, delivery_address=f"{city_name}, {pvz['address']}", cheese_order_status="pending")
+
+    await show(update, context,
+        "<b>✅ Заказ принят</b>\n\n"
+        f"📍 {city_name}, {pvz['name']}\n"
+        f"{pvz['address']}\n\n"
+        "Мы оформим доставку в ближайшее время. Приятного аппетита! 😋",
+        [MENU_ROW]
+    )
+
+
+# ───────────────────────── Команды ─────────────────────────
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("waiting_for_city", None)
+    context.user_data.pop("waiting_for_address", None)
+    register(update)
+    if context.args:
+        referrer_id = attach_referrer(update.effective_user.id, context.args[0])
+        if referrer_id:
+            name = html.escape(update.effective_user.first_name or "Друг")
+            try:
+                await context.bot.send_message(referrer_id,
+                    f"<b>🤝 Новый друг по вашей ссылке: {name}</b>\n\n"
+                    f"Когда друг оформит подписку, вы получите +{plural_days(REFERRAL_BONUS_DAYS)}.",
+                )
+            except Exception as e:
+                logger.warning("Не удалось уведомить пригласившего %s: %s", referrer_id, e)
+    await show_main_menu(update, context)
+
+
+async def invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await show_referral(update, context)
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await show_help(update, context)
+
+
+async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await show_tariffs(update, context)
+
+
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await show_account(update, context)
+
+
+async def servers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await show_servers(update, context)
+
+
+async def gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await show_gift(update, context)
+
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Текстовые сообщения: город / адрес для творога, иначе — подсказка с меню"""
+    user_id = update.effective_user.id
+
+    if context.user_data.get("waiting_for_city") or context.user_data.get("waiting_for_address"):
+        if not is_cheese_eligible(user_id):
+            context.user_data.pop("waiting_for_city", None)
+            context.user_data.pop("waiting_for_address", None)
+            await show_gift(update, context)
+            return
+
+    if context.user_data.get("waiting_for_city"):
+        context.user_data["waiting_for_city"] = False
+        context.user_data["waiting_for_address"] = True
+        context.user_data["cheese_city"] = update.message.text
+        await update.message.reply_text(
+            f"🏙 Город: <b>{html.escape(update.message.text)}</b>\n\n"
+            "Теперь напишите адрес пункта выдачи Ozon.\n"
+            "<i>Например: ул. Ленина, д. 48</i>"
+        )
+        return
+
     if context.user_data.get("waiting_for_address"):
-        user_id = update.effective_user.id
-        address = update.message.text
-        update_user(user_id, delivery_address=address, cheese_order_status="pending")
         context.user_data["waiting_for_address"] = False
+        city = context.user_data.pop("cheese_city", "")
+        address = f"{city}, {update.message.text}" if city else update.message.text
+        update_user(user_id, delivery_address=address, cheese_order_status="pending")
 
         user = get_user(user_id)
-        username = user["username"] or "Без username"
-
-        # Формируем сообщение для админа
-        admin_text = (
-            f"🔒 <b>Новый заказ на творог!</b>\n\n"
+        username = html.escape(user["username"] or "Без username")
+        await notify_admin(context,
+            f"📦 <b>Новый заказ на творог!</b>\n\n"
             f"👤 @{username} (ID: {user_id})\n"
-            f"📍 Адрес: {address}\n\n"
-            f"📦 Творог Коровка из Кореновки 180г (~76₽)\n\n"
-            f"🔗 <a href=\"https://www.ozon.ru/product/154359454\">Открыть на Ozon</a>\n\n"
+            f"📍 Адрес: {html.escape(address)}\n\n"
+            f"📦 {OZON_PRODUCT_NAME} (~{OZON_PRODUCT_PRICE}₽)\n\n"
+            f"🔗 <a href=\"{generate_ozon_link()}\">Открыть на Ozon</a>\n\n"
             f"После заказа: /set_cheese {user_id} ordered"
         )
-
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=admin_text,
-            parse_mode='HTML'
-        )
-
-        # Ответ пользователю
         await update.message.reply_text(
-            "✅ <b>Адрес принят!</b>\n\n"
-            "Мы заказываем творог на Ozon.\n"
-            "Ожидай доставку в ближайшие дни! 🔒",
-            parse_mode='HTML'
+            "<b>✅ Заказ принят</b>\n\n"
+            f"📍 {html.escape(address)}\n\n"
+            "Мы оформим доставку в ближайшее время. Приятного аппетита! 😋",
+            reply_markup=InlineKeyboardMarkup([MENU_ROW])
         )
+        return
 
-# Обработка нажатий на кнопки — НОВЫЕ СООБЩЕНИЯ
+    await update.message.reply_text(
+        "Я понимаю только кнопки 🙂 Откройте меню:",
+        reply_markup=InlineKeyboardMarkup([[btn("🏠 Главное меню", "back_to_menu")]])
+    )
+
+
+# ───────────────────────── Кнопки ─────────────────────────
+
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик callback_query — каждая кнопка = новое сообщение"""
+    """Обработчик нажатий на кнопки"""
     query = update.callback_query
-    await query.answer()
     data = query.data
-    chat_id = query.message.chat_id
 
-    # === КУПИТЬ VPN ===
-    if data == "buy":
-        keyboard = []
-        for key, tariff in TARIFFS.items():
-            if tariff["price"] == 0:
-                text = f"🆓 {tariff['name']} — бесплатно"
-            else:
-                emoji = {"week": "⏰", "month": "📅", "quarter": "📆", "year": "🎯"}.get(key, "💳")
-                text = f"{emoji} {tariff['name']} — {tariff['price']} ₽"
-            keyboard.append([InlineKeyboardButton(text, callback_data=f"buy_{key}")])
-        keyboard.append([InlineKeyboardButton("🔙 Назад в меню", callback_data="back_to_menu")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await context.bot.send_message(chat_id, TARIFF_TEXT, parse_mode='HTML', reply_markup=reply_markup)
+    # Проверка оплаты сама отвечает на нажатие (всплывающим сообщением)
+    if data.startswith("check_payment_"):
+        await check_payment(update, context)
+        return
 
-    # === ВЫБОР ТАРИФА ===
+    await query.answer()
+
+    if data in ("back_to_menu", "menu"):
+        await show_main_menu(update, context)
+    elif data == "buy":
+        await show_tariffs(update, context)
     elif data.startswith("buy_"):
-        tariff_key = data.replace("buy_", "")
+        tariff_key = data[len("buy_"):]
         if tariff_key == "trial":
-            user_id = query.from_user.id
-            activate_subscription(user_id, 3)
-            keyboard = [[InlineKeyboardButton("📥 Получить конфиг", callback_data=f"get_config_{user_id}")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await context.bot.send_message(chat_id,
-                "✅ <b>Пробный период активирован!</b>\n\n3 дня бесплатно. Нажми /status чтобы проверить.",
-                parse_mode='HTML', reply_markup=reply_markup
-            )
+            await claim_trial(update, context)
         elif tariff_key in TARIFFS:
-            user_id = query.from_user.id
-            tariff = TARIFFS[tariff_key]
-
-            # Создаём платёжную ссылку
-            payment = create_payment_link(tariff_key, user_id)
-
-            if payment:
-                # Сохраняем ID платежа в context
-                context.user_data["pending_payment"] = {
-                    "payment_id": payment["payment_id"],
-                    "tariff": tariff_key
-                }
-
-                # Сообщение как у Шука VPN
-                payment_text = (
-                    f"⚡ <b>Счёт на оплату подписки создан.</b>\n\n"
-                    f"💰 Стоимость: <b>{tariff['price']} ₽</b>\n"
-                    f"📦 Подписка: <b>{tariff['name']}</b>\n"
-                    f"⏰ Срок: {tariff['days']} дней\n\n"
-                    f"💳 <b>Способы оплаты:</b>\n"
-                    f"• Счёт (СБП)\n"
-                    f"• Карта ****\n"
-                    f"• Система быстрых платежей\n\n"
-                    f"📱 СБП или 💳 Карта · <b>{tariff['price']} ₽</b>"
-                )
-
-                # Кнопки оплаты
-                keyboard = [
-                    [InlineKeyboardButton(
-                        f"📱 СБП или 💳 Карта · {tariff['price']} ₽",
-                        url=payment["confirmation_url"]
-                    )],
-                    [InlineKeyboardButton(
-                        "🔄 Другой способ оплаты",
-                        url=payment["confirmation_url"]
-                    )]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-
-                await context.bot.send_message(chat_id, payment_text, parse_mode='HTML', reply_markup=reply_markup)
-
-                # Кнопка проверки оплаты
-                check_keyboard = [[
-                    InlineKeyboardButton(
-                        "✅ Проверить оплату",
-                        callback_data=f"check_payment_{tariff_key}"
-                    )
-                ]]
-                check_markup = InlineKeyboardMarkup(check_keyboard)
-                await context.bot.send_message(chat_id,
-                    "После оплаты нажми кнопку ниже:",
-                    reply_markup=check_markup
-                )
-            else:
-                await context.bot.send_message(chat_id,
-                    "❌ Ошибка создания платежа. Попробуй позже.",
-                    parse_mode='HTML'
-                )
-
-    # === ПРОВЕРКА ОПЛАТЫ ===
-    elif data.startswith("check_payment_"):
-        tariff_key = data.replace("check_payment_", "")
-        user_id = query.from_user.id
-        pending = context.user_data.get("pending_payment")
-
-        if pending and pending.get("payment_id"):
-            payment_status = check_payment_status(pending["payment_id"])
-
-            if payment_status["paid"]:
-                # Оплата прошла!
-                activate_subscription(user_id, TARIFFS[tariff_key]["days"])
-                add_payment(user_id, TARIFFS[tariff_key]["price"], tariff_key, pending["payment_id"])
-
-                keyboard = [[InlineKeyboardButton("📥 Получить конфиг", callback_data=f"get_config_{user_id}")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-
-                await context.bot.send_message(chat_id,
-                    "✅ <b>Оплата прошла успешно!</b>\n\n"
-                    "Твоя подписка активирована!\n\n"
-                    "Нажми кнопку, чтобы скачать конфиг:",
-                    parse_mode='HTML', reply_markup=reply_markup
-                )
-
-                # Творог при подписке от 1 месяца
-                if tariff_key in ["month", "quarter", "year"]:
-                    await context.bot.send_message(chat_id,
-                        "🔒 <b>Поздравляю! Ты получаешь творог!</b>\n\n"
-                        "Нажми кнопку ниже и выбери город:",
-                        parse_mode='HTML'
-                    )
-
-                context.user_data.pop("pending_payment", None)
-            else:
-                await context.bot.send_message(chat_id,
-                    "⏳ Оплата ещё не поступила.\n"
-                    "Попробуй проверить через минуту.",
-                    parse_mode='HTML'
-                )
-        else:
-            await context.bot.send_message(chat_id,
-                "❌ Нет активного платежа. Начни заново через /buy",
-                parse_mode='HTML'
-            )
-
-    # === МОЙ СТАТУС ===
-    elif data == "status":
-        user = get_user(query.from_user.id)
-        if user:
-            await context.bot.send_message(chat_id, format_subscription_status(user), parse_mode='HTML')
-        else:
-            await context.bot.send_message(chat_id, "❌ Ты ещё не зарегистрирован")
-
-    # === СЕРВЕРЫ ===
-    elif data == "servers":
-        keyboard = []
-        for server_id, server in SERVERS.items():
-            keyboard.append([InlineKeyboardButton(
-                f"{server['country']} {server['name']}",
-                callback_data=f"server_{server_id}"
-            )])
-        keyboard.append([InlineKeyboardButton("🔙 Назад в меню", callback_data="back_to_menu")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await context.bot.send_message(chat_id, "🌍 <b>Выбери сервер:</b>", parse_mode='HTML', reply_markup=reply_markup)
-
-    # === ВЫБОР СЕРВЕРА ===
-    elif data.startswith("server_"):
-        server_id = data.replace("server_", "")
-        if server_id in SERVERS:
-            server = SERVERS[server_id]
-            await context.bot.send_message(chat_id,
-                f"🌍 <b>{server['name']}</b>\n\n"
-                f"Страна: {server['country']}\n"
-                f"IP: {server['ip']}\n"
-                f"Порт: {server['port']}\n\n"
-                f"Теперь купи подписку через /buy",
-                parse_mode='HTML'
-            )
-
-    # === ПОМОЩЬ ===
-    elif data == "help":
-        keyboard = [
-            [InlineKeyboardButton("💬 Написать в поддержку", url="https://t.me/tvorog_support")],
-            [InlineKeyboardButton("🏠 Назад в меню", callback_data="back_to_menu")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await context.bot.send_message(chat_id, HELP_TEXT, parse_mode='HTML', reply_markup=reply_markup)
-
-    # === ПОДКЛЮЧИТЬСЯ (выбор устройства) ===
-    elif data == "connect":
-        reply_markup = InlineKeyboardMarkup(get_device_keyboard())
-        await context.bot.send_message(chat_id,
-            "Выберите устройство, которое хотите подключить:",
-            reply_markup=reply_markup
-        )
-
-    # === ИНФОРМАЦИЯ О СЕРВИСЕ ===
-    elif data == "info":
-        keyboard = [
-            [InlineKeyboardButton("📖 Инструкция", url="https://t.me/tvorog_vpn_bot")],
-            [InlineKeyboardButton("🔑 Тех. поддержка", url="https://t.me/tvorog_support")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await context.bot.send_message(chat_id, INFO_TEXT, parse_mode='HTML', reply_markup=reply_markup)
-
-    # === ЛИЧНЫЙ КАБИНЕТ ===
-    elif data == "personal_account":
-        user_id = query.from_user.id
-        user = get_user(user_id)
-
-        if user:
-            from datetime import datetime
-            expires = user["expires_at"][:10] if user["expires_at"] else "Неизвестно"
-            is_active = "Активна" if user["expires_at"] and datetime.fromisoformat(user["expires_at"]) > datetime.now() else "Не активна"
-
-            account_text = f"""
-<b>Личный кабинет</b>
-
-<b>ID:</b> {user_id}
-<b>Email:</b> {query.from_user.username or "Не указан"}
-
-<b>Информация о подписке:</b>
-• Текущий план: {is_active}
-• Дата окончания: {expires}
-
-<b>Команды:</b>
-"""
-            keyboard = [
-                [InlineKeyboardButton("🔑 Подключиться", callback_data="connect")],
-                [InlineKeyboardButton("📖 Инструкция", callback_data="help")],
-                [InlineKeyboardButton("🎁 Получить творог", callback_data="gift")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await context.bot.send_message(chat_id, account_text, parse_mode='HTML', reply_markup=reply_markup)
-        else:
-            await context.bot.send_message(chat_id, "Вы ещё не зарегистрированы. Нажмите /start")
-
-    # === ЗАБРАТЬ ПОДАРОК (3 дня бесплатно) ===
+            await show_payment_methods(update, context, tariff_key)
+    elif data.startswith(("paycard_", "paystars_", "paycrypto_")):
+        method, tariff_key = data.split("_", 1)
+        if tariff_key in TARIFFS and TARIFFS[tariff_key]["price"] > 0:
+            handler = {"paycard": pay_card, "paystars": pay_stars, "paycrypto": pay_crypto}[method]
+            await handler(update, context, tariff_key)
     elif data == "claim_gift":
-        user_id = query.from_user.id
-        user = get_user(user_id)
-
-        # Проверяем, брал ли уже пробный период
-        if user and user["expires_at"]:
-            from datetime import datetime
-            expires = datetime.fromisoformat(user["expires_at"])
-            if expires > datetime.now():
-                # Уже есть активная подписка
-                keyboard = [[InlineKeyboardButton("📱 Выбрать устройство", callback_data="select_device")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                await context.bot.send_message(chat_id,
-                    "🎉 У вас уже есть активная подписка!\n\n"
-                    "📱 Выберите устройство для установки:",
-                    reply_markup=reply_markup
-                )
-                return
-
-        # Активируем пробный период
-        activate_subscription(user_id, 3)
-
-        keyboard = [[InlineKeyboardButton("📱 Выбрать устройство", callback_data="select_device")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await context.bot.send_message(chat_id,
-            "🎉 Пробный период на 3 дня активирован!\n\n"
-            "📱 Теперь выберите ваше устройство, чтобы получить VPN-ключ:",
-            reply_markup=reply_markup
-        )
-
-    # === ВЫБОР УСТРОЙСТВА ===
-    elif data == "select_device" or data == "devices":
-        reply_markup = InlineKeyboardMarkup(get_device_keyboard())
-        await context.bot.send_message(chat_id,
-            "📱 Выберите устройство, чтобы получить VPN-ключ:",
-            reply_markup=reply_markup
-        )
-
-    # === УСТАНОВКА IPHONE ===
-    elif data == "install_iphone":
-        keyboard = [
-            [InlineKeyboardButton("🔑 Получить VPN-ключ", callback_data="get_config_iphone")],
-            [InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_menu")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await context.bot.send_message(chat_id, INSTALL_IPHONE_TEXT, parse_mode='HTML', reply_markup=reply_markup)
-
-    # === УСТАНОВКА ANDROID ===
-    elif data == "install_android":
-        keyboard = [
-            [InlineKeyboardButton("🔑 Получить VPN-ключ", callback_data="get_config_android")],
-            [InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_menu")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await context.bot.send_message(chat_id, INSTALL_ANDROID_TEXT, parse_mode='HTML', reply_markup=reply_markup)
-
-    # === УСТАНОВКА WINDOWS ===
-    elif data == "install_windows":
-        keyboard = [
-            [InlineKeyboardButton("🔑 Получить VPN-ключ", callback_data="get_config_windows")],
-            [InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_menu")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await context.bot.send_message(chat_id, INSTALL_WINDOWS_TEXT, parse_mode='HTML', reply_markup=reply_markup)
-
-    # === УСТАНОВКА MAC ===
-    elif data == "install_mac":
-        keyboard = [
-            [InlineKeyboardButton("🔑 Получить VPN-ключ", callback_data="get_config_mac")],
-            [InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_menu")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await context.bot.send_message(chat_id, INSTALL_MAC_TEXT, parse_mode='HTML', reply_markup=reply_markup)
-
-    # === УСТАНОВКА LINUX ===
-    elif data == "install_linux":
-        keyboard = [
-            [InlineKeyboardButton("🔑 Получить VPN-ключ", callback_data="get_config_linux")],
-            [InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_menu")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await context.bot.send_message(chat_id, INSTALL_LINUX_TEXT, parse_mode='HTML', reply_markup=reply_markup)
-
-    # === ПОЛУЧИТЬ VPN-КЛЮЧ (для всех устройств) ===
-    elif data.startswith("get_config_iphone") or data.startswith("get_config_android") or data.startswith("get_config_windows") or data.startswith("get_config_mac") or data.startswith("get_config_linux"):
-        user_id = query.from_user.id
-        user = get_user(user_id)
-
-        if user and is_subscription_active(user_id):
-            # Генерируем ключи если нет
-            if not user["wg_private_key"]:
-                private_key, public_key = generate_wg_keys()
-                update_user(user_id, wg_private_key=private_key, wg_public_key=public_key)
-                user = get_user(user_id)
-
-            # Создаём конфиг
-            config, client_ip = create_client_config(user_id, user["wg_private_key"], user["wg_public_key"])
-            save_client_config(user_id, config)
-
-            # Отправляем конфиг
-            with open(f"configs/{user_id}.conf", "rb") as f:
-                await context.bot.send_document(chat_id,
-                    document=InputFile(f),
-                    caption="VPN-ключ готов!\n\nИмпортируйте в Happ",
-                    parse_mode='HTML'
-                )
-
-            # Кнопка добавления в Happ
-            keyboard = [
-                [InlineKeyboardButton("Добавить в Happ", url="https://happ://import")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await context.bot.send_message(chat_id,
-                "Нажмите кнопку ниже, чтобы добавить подписку в Happ.\n"
-                "Или скопируйте ссылку выше и вставьте вручную.",
-                reply_markup=reply_markup
-            )
-        else:
-            await context.bot.send_message(chat_id,
-                "Нет активной подписки.\n"
-                "Нажмите «Забрать подарок» чтобы получить 3 дня бесплатно.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Забрать подарок", callback_data="claim_gift")]])
-            )
-
-    # === ПОЛУЧИТЬ ТВОРОГ ===
-    elif data == "gift":
-        user_id = query.from_user.id
-        if is_cheese_eligible(user_id):
-            # Показываем выбор города
-            reply_markup = get_city_keyboard()
-            await context.bot.send_message(chat_id,
-                "🔒 <b>Поздравляю! Творог в подарок!</b>\n\n"
-                "Выбери свой город для доставки:",
-                parse_mode='HTML', reply_markup=reply_markup
-            )
-        else:
-            user = get_user(user_id)
-            if user and user["cheese_order_status"] != "none":
-                text = "🔒 Ты уже получил творог!\nОдна упаковка на аккаунт 🎁"
-            else:
-                text = "🔒 <b>Творог в подарок!</b>\n\nТолько при покупке от 1 месяца.\nКупи через /buy! 🎁"
-            await context.bot.send_message(chat_id, text, parse_mode='HTML')
-
-    # === ВЫБОР ГОРОДА ===
-    elif data.startswith("city_"):
-        city_id = data.replace("city_", "")
-        if city_id == "other":
-            context.user_data["waiting_for_city"] = True
-            await context.bot.send_message(chat_id,
-                "📝 Напиши название своего города:",
-                parse_mode='HTML'
-            )
-        else:
-            # Сохраняем город
-            context.user_data["selected_city"] = city_id
-            city_name = get_city_name(city_id)
-
-            # Показываем пункты выдачи
-            reply_markup = get_pvz_keyboard(city_id)
-            await context.bot.send_message(chat_id,
-                f"🏙️ <b>{city_name}</b>\n\n"
-                f"Выбери пункт выдачи Ozon:",
-                parse_mode='HTML', reply_markup=reply_markup
-            )
-
-    # === ВЫБОР ПУНКТА ВЫДАЧИ ===
-    elif data.startswith("pvz_"):
-        parts = data.split("_")
-        city_id = parts[1]
-        pvz_id = parts[2]
-
-        user_id = query.from_user.id
-        user = get_user(user_id)
-        username = user["username"] or "Без username"
-
-        # Формируем сообщение для админа
-        admin_text = format_order_message(username, user_id, city_id, pvz_id)
-
-        # Отправляем админу
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=admin_text,
-            parse_mode='HTML'
-        )
-
-        # Сохраняем данные
-        city_name = get_city_name(city_id)
-        pvz = get_pvz_by_id(city_id, pvz_id)
-
-        update_user(user_id,
-            delivery_address=f"{city_name}, {pvz['address']}",
-            cheese_order_status="pending"
-        )
-
-        # Ответ пользователю
-        await context.bot.send_message(chat_id,
-            f"✅ <b>Выбор принят!</b>\n\n"
-            f"🏙️ Город: {city_name}\n"
-            f"📍 Пункт: {pvz['name']}\n"
-            f"📍 Адрес: {pvz['address']}\n\n"
-            f"Мы заказываем творог на Ozon.\n"
-            f"Ожидай доставку в ближайшие дни! 🔒\n\n"
-            f"💡 <i>Творог можно добавить в кашу или есть просто так 😋</i>",
-            parse_mode='HTML'
-        )
-
-    # === НАЗАД К ГОРОДАМ ===
-    elif data == "back_to_cities":
-        reply_markup = get_city_keyboard()
-        await context.bot.send_message(chat_id,
-            "🏙️ Выбери свой город:",
-            parse_mode='HTML', reply_markup=reply_markup
-        )
-
-    # === ГЛАВНОЕ МЕНЮ ===
-    elif data == "back_to_menu":
-        reply_markup = InlineKeyboardMarkup(get_main_menu_keyboard())
-        await context.bot.send_message(chat_id,
-            WELCOME_TEXT,
-            parse_mode='HTML', reply_markup=reply_markup
-        )
-
-    # === ПОЛУЧИТЬ КОНФИГ ===
+        await claim_trial(update, context)
+    elif data in ("connect", "select_device", "devices"):
+        await show_devices(update, context)
+    elif data.startswith("install_") and data[len("install_"):] in DEVICES:
+        await show_install(update, context, data[len("install_"):])
     elif data.startswith("get_config_"):
-        user_id = int(data.replace("get_config_", ""))
-        user = get_user(user_id)
-
-        if user and is_subscription_active(user_id):
-            if not user["wg_private_key"]:
-                private_key, public_key = generate_wg_keys()
-                update_user(user_id, wg_private_key=private_key, wg_public_key=public_key)
-                user = get_user(user_id)
-
-            config, client_ip = create_client_config(user_id, user["wg_private_key"], user["wg_public_key"])
-            save_client_config(user_id, config)
-
-            with open(f"configs/{user_id}.conf", "rb") as f:
-                await context.bot.send_document(chat_id,
-                    document=InputFile(f),
-                    caption="🔒 <b>Конфиг Творог VPN</b>\n\nИмпортируй в Happ или MantaRay",
-                    parse_mode='HTML'
-                )
-
-            keyboard = [[InlineKeyboardButton("📖 Инструкция", callback_data="instruction")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await context.bot.send_message(chat_id,
-                "✅ Конфиг скачан!\n\nНажми для инструкции:",
-                reply_markup=reply_markup
-            )
-        else:
-            await context.bot.send_message(chat_id, "❌ Нет активной подписки. Купи через /buy")
-
-    # === ИНСТРУКЦИЯ ===
+        # get_config_iphone / ... и старые кнопки get_config_<id>
+        await send_vpn_key(update, context)
+    elif data in ("personal_account", "status"):
+        await show_account(update, context)
+    elif data == "reset_key":
+        await show(update, context,
+            "<b>🔄 Перевыпустить ключ?</b>\n\n"
+            "Старый ключ перестанет работать на всех устройствах — "
+            "пригодится, если он попал к посторонним. Новый ключ придёт сюда.",
+            [[btn("Да, перевыпустить", "reset_key_yes")], [btn("‹ Назад", "personal_account")]]
+        )
+    elif data == "reset_key_yes":
+        if not is_subscription_active(update.effective_user.id):
+            await show_no_subscription(update, context)
+            return
+        try:
+            reset_client_key(update.effective_user.id)
+        except WireGuardError as e:
+            logger.error("Ошибка перевыпуска ключа для %s: %s", update.effective_user.id, e)
+            await show(update, context, "<b>⚠️ Не удалось перевыпустить ключ</b>\n\nПопробуйте позже.", [MENU_ROW])
+            return
+        await show(update, context, "<b>✅ Ключ перевыпущен</b>\n\nСтарый ключ отключён. Новый — ниже.")
+        await send_vpn_key(update, context)
+    elif data == "referral":
+        await show_referral(update, context)
+    elif data == "info":
+        await show_info(update, context)
+    elif data == "help":
+        await show_help(update, context)
     elif data == "instruction":
-        await context.bot.send_message(chat_id, CONFIG_INSTRUCTION_TEXT, parse_mode='HTML')
+        await show_instruction(update, context)
+    elif data == "servers" or data.startswith("server_"):
+        await show_servers(update, context)
+    elif data == "gift" or data == "back_to_cities":
+        await show_gift(update, context)
+    elif data.startswith("city_"):
+        await show_city(update, context, data[len("city_"):])
+    elif data.startswith("pvz_"):
+        await confirm_cheese_order(update, context, data)
 
-# Обработка успешной оплаты
-async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка успешной оплаты"""
-    payment_info = await successful_payment_callback(update, context)
 
-    if payment_info:
-        user_id = payment_info["user_id"]
-        tariff_key = payment_info["tariff"]
-        days = TARIFFS[tariff_key]["days"]
-        activate_subscription(user_id, days)
-        add_payment(user_id, payment_info["amount"], tariff_key, payment_info["payment_id"])
+# ───────────────────────── Админ-команды ─────────────────────────
 
-        await update.message.reply_text(SUCCESS_PAYMENT_TEXT, parse_mode='HTML')
-
-        keyboard = [[InlineKeyboardButton("📥 Получить конфиг VPN", callback_data=f"get_config_{user_id}")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("Нажми кнопку, чтобы скачать конфиг:", reply_markup=reply_markup)
-
-        # Творог в подарок при подписке от 1 месяца
-        if tariff_key in ["month", "quarter", "year"]:
-            await update.message.reply_text(
-                "🔒 <b>Поздравляю! Ты получаешь творог!</b>\n\n"
-                "Напиши /gift и укажи адрес доставки! 🎁",
-                parse_mode='HTML'
-            )
-
-# Команда /admin
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Админ-панель с расширенной статистикой"""
     if update.effective_user.id != ADMIN_ID:
@@ -740,7 +891,6 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     stats = get_user_stats()
 
-    # Форматируем статистику по тарифам
     tariffs_text = ""
     for tariff, data in stats.get("tariffs_stats", {}).items():
         tariffs_text += f"  • {tariff}: {data['count']} продаж ({data['revenue']} ₽)\n"
@@ -748,52 +898,39 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     admin_text = f"""
 📊 <b>Админ-панель {BOT_NAME}</b>
 
-━━━━━━━━━━━━━━━━━━━━━━
-
-👥 <b>Пользователи:</b>
+👥 <b>Пользователи</b>
   • Всего: {stats['total_users']}
   • Активных: {stats['active_users']}
   • Новых сегодня: {stats['new_today']}
   • Новых за неделю: {stats['new_week']}
 
-━━━━━━━━━━━━━━━━━━━━━━
-
-💰 <b>Доход:</b>
+💰 <b>Доход</b>
   • Сегодня: {stats['today_revenue']} ₽
   • За неделю: {stats['week_revenue']} ₽
   • За месяц: {stats['month_revenue']} ₽
   • Всего: {stats['total_revenue']} ₽
 
-━━━━━━━━━━━━━━━━━━━━━━
-
-📦 <b>Продажи по тарифам:</b>
+📦 <b>Продажи по тарифам</b>
 {tariffs_text if tariffs_text else "  Нет продаж"}
-
-━━━━━━━━━━━━━━━━━━━━━━
-
-🧪 <b>Пробные периоды:</b>
+🧪 <b>Пробные периоды</b>
   • Взяли: {stats['trial_users']}
   • Купили потом: {stats['paid_users']}
 
-━━━━━━━━━━━━━━━━━━━━━━
-
-🔒 <b>Творог:</b>
+🎁 <b>Творог</b>
   • Заказов: {stats['cheese_orders']}
   • Ожидают: {stats['cheese_pending']}
   • Доставлено: {stats['cheese_delivered']}
 
-━━━━━━━━━━━━━━━━━━━━━━
-
-📝 <b>Команды:</b>
-/add_user ID DAYS — Добавить подписку
-/cheese_orders — Заказы творога
-/order_cheese ID — Заказать на Ozon
-/set_cheese ID STATUS — Статус творога
-/users — Список пользователей
+📝 <b>Команды</b>
+/add_user ID DAYS — добавить подписку
+/cheese_orders — заказы творога
+/order_cheese ID — заказать на Ozon
+/set_cheese ID STATUS — статус творога
+/users — список пользователей
 """
-    await update.message.reply_text(admin_text, parse_mode='HTML')
+    await update.message.reply_text(admin_text)
 
-# Команда /add_user
+
 async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Добавление подписки"""
     if update.effective_user.id != ADMIN_ID:
@@ -802,11 +939,11 @@ async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = int(context.args[0])
         days = int(context.args[1])
         activate_subscription(user_id, days)
-        await update.message.reply_text(f"✅ Подписка на {days} дней добавлена ({user_id})")
+        await update.message.reply_text(f"✅ Подписка на {plural_days(days)} добавлена ({user_id})")
     except (IndexError, ValueError):
         await update.message.reply_text("Использование: /add_user USER_ID DAYS")
 
-# Команда /users — список пользователей
+
 async def users_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Список активных пользователей"""
     if update.effective_user.id != ADMIN_ID:
@@ -814,7 +951,6 @@ async def users_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
-
     cursor.execute(
         "SELECT user_id, username, expires_at FROM users WHERE is_active = 1 AND expires_at > ? ORDER BY expires_at DESC LIMIT 20",
         (datetime.now().isoformat(),)
@@ -826,46 +962,47 @@ async def users_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📋 Нет активных пользователей")
         return
 
-    text = "📋 <b>Активные пользователи (последние 20):</b>\n\n"
+    text = "📋 <b>Активные пользователи (последние 20)</b>\n\n"
     for user_id, username, expires_at in users:
-        expires = datetime.fromisoformat(expires_at)
-        days_left = (expires - datetime.now()).days
-        text += f"👤 @{username or 'нет'} (ID: {user_id})\n"
-        text += f"   ⏰ До: {expires.strftime('%d.%m.%Y')} ({days_left} дн.)\n\n"
+        text += f"👤 @{html.escape(username or 'нет')} (ID: {user_id})\n"
+        text += f"   ⏰ До {format_date(expires_at)} (осталось {plural_days(days_left(expires_at))})\n\n"
+    await update.message.reply_text(text)
 
-    await update.message.reply_text(text, parse_mode='HTML')
 
-# Команда /cheese_orders
 async def cheese_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Pending заказы на творог"""
+    """Ожидающие заказы на творог"""
     if update.effective_user.id != ADMIN_ID:
         return
     orders = get_pending_cheese_orders()
     if not orders:
-        await update.message.reply_text("🔒 Нет pending заказов")
+        await update.message.reply_text("🎁 Нет ожидающих заказов")
         return
-    text = "🔒 <b>Pending заказы:</b>\n\n"
+    text = "🎁 <b>Ожидающие заказы</b>\n\n"
     for o in orders:
-        text += f"👤 @{o['username']} (ID: {o['user_id']})\n📍 {o['address']}\n✅ /set_cheese {o['user_id']} ordered\n\n"
-    await update.message.reply_text(text, parse_mode='HTML')
+        text += (
+            f"👤 @{html.escape(o['username'] or 'нет')} (ID: {o['user_id']})\n"
+            f"📍 {html.escape(o['address'] or '')}\n"
+            f"✅ /set_cheese {o['user_id']} ordered\n\n"
+        )
+    await update.message.reply_text(text)
 
-# Команда /set_cheese
+
 async def set_cheese(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Изменить статус творога"""
     if update.effective_user.id != ADMIN_ID:
         return
     try:
         user_id = int(context.args[0])
-        status = context.args[1]
-        if status not in ["pending", "ordered", "delivered", "none"]:
+        new_status = context.args[1]
+        if new_status not in ["pending", "ordered", "delivered", "none"]:
             await update.message.reply_text("Статус: pending, ordered, delivered, none")
             return
-        update_cheese_order(user_id, status)
-        await update.message.reply_text(f"✅ Статус творога для {user_id} → {status}")
+        update_cheese_order(user_id, new_status)
+        await update.message.reply_text(f"✅ Статус творога для {user_id} → {new_status}")
     except (IndexError, ValueError):
         await update.message.reply_text("Использование: /set_cheese USER_ID STATUS")
 
-# Команда /order_cheese USER_ID — быстрый переход на Ozon
+
 async def order_cheese(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Открыть Ozon для заказа творога"""
     if update.effective_user.id != ADMIN_ID:
@@ -878,26 +1015,120 @@ async def order_cheese(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         address = user["delivery_address"]
-        username = user["username"] or "Без username"
-        ozon_link = generate_ozon_link(address)
-
+        username = html.escape(user["username"] or "Без username")
         await update.message.reply_text(
-            f"🔒 <b>Заказ творога</b>\n\n"
+            f"🎁 <b>Заказ творога</b>\n\n"
             f"👤 @{username} (ID: {user_id})\n"
-            f"📍 Адрес: {address}\n\n"
+            f"📍 Адрес: {html.escape(address)}\n\n"
             f"📦 {OZON_PRODUCT_NAME}\n"
             f"💰 Цена: {OZON_PRODUCT_PRICE}₽\n\n"
-            f"🔗 <a href=\"{ozon_link}\">Открыть на Ozon</a>\n\n"
-            f"После заказа: /set_cheese {user_id} ordered",
-            parse_mode='HTML'
+            f"🔗 <a href=\"{generate_ozon_link(address)}\">Открыть на Ozon</a>\n\n"
+            f"После заказа: /set_cheese {user_id} ordered"
         )
     except (IndexError, ValueError):
         await update.message.reply_text("Использование: /order_cheese USER_ID")
 
+
+# ───────────────────────── Запуск ─────────────────────────
+
+async def sync_wg_peers(context: ContextTypes.DEFAULT_TYPE):
+    """Отключить истёкшие подписки от VPN"""
+    for peer in get_wg_peers(active=False):
+        try:
+            remove_peer(peer["public_key"])
+        except WireGuardError as e:
+            logger.warning("Не удалось отключить пир %s: %s", peer["user_id"], e)
+
+
+async def post_init(application: Application):
+    """После старта: меню команд и восстановление VPN-подключений (после перезагрузки сервера пиры теряются)"""
+    try:
+        await application.bot.set_my_commands([
+            BotCommand("start", "Главное меню"),
+            BotCommand("buy", "Тарифы и оплата"),
+            BotCommand("status", "Личный кабинет"),
+            BotCommand("gift", "Творог в подарок"),
+            BotCommand("invite", "Пригласить друга"),
+            BotCommand("help", "Поддержка"),
+            BotCommand("paysupport", "Вопросы по оплате"),
+        ])
+    except Exception as e:
+        logger.warning("Не удалось установить меню команд: %s", e)
+
+    if WEBAPP_URL:
+        from webapp import start_webapp
+        application.bot_data["webapp_runner"] = await start_webapp(application, WEBAPP_PORT)
+        try:
+            await application.bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp("Приложение", WebAppInfo(WEBAPP_URL))
+            )
+        except Exception as e:
+            logger.warning("Не удалось установить кнопку приложения: %s", e)
+        logger.info("📱 Мини-приложение: %s (порт %s)", WEBAPP_URL, WEBAPP_PORT)
+
+    restored = 0
+    for peer in get_wg_peers(active=True):
+        try:
+            add_peer(peer["public_key"], peer["ip"])
+            restored += 1
+        except WireGuardError as e:
+            logger.error("Не удалось восстановить пир %s: %s", peer["user_id"], e)
+            break
+    logger.info("Восстановлено VPN-подключений: %s", restored)
+
+
+async def post_shutdown(application: Application):
+    runner = application.bot_data.get("webapp_runner")
+    if runner:
+        await runner.cleanup()
+
+
+async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/app — открыть мини-приложение"""
+    if not WEBAPP_URL:
+        await show_main_menu(update, context)
+        return
+    await update.message.reply_text(
+        "<b>📱 Приложение Творог VPN</b>\n\nПодписка, оплата и ключи — в одном месте.",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("📱 Открыть приложение", web_app=WebAppInfo(WEBAPP_URL))
+        ]])
+    )
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Логировать все ошибки, чтобы бот не падал молча"""
+    if isinstance(context.error, Conflict):
+        logger.error(
+            "Конфликт: этот же токен используется другой копией бота. "
+            "Остановите старую копию или перевыпустите токен в @BotFather."
+        )
+        return
+    logger.error("Ошибка при обработке обновления %s", update, exc_info=context.error)
+
+
 def main():
     """Запуск бота"""
+    if not BOT_TOKEN:
+        sys.exit("❌ BOT_TOKEN не задан. Впишите токен от @BotFather в файл .env (BOT_TOKEN=...)")
+    if not ADMIN_ID:
+        logger.warning("ADMIN_ID не задан — админ-команды и уведомления о заказах работать не будут")
+
     init_db()
-    application = Application.builder().token(BOT_TOKEN).build()
+    persistence = PicklePersistence(filepath=os.environ.get("PERSISTENCE_PATH", "bot_state.pickle"))
+    defaults = Defaults(
+        parse_mode=ParseMode.HTML,
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
+    )
+    application = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .defaults(defaults)
+        .persistence(persistence)
+        .post_init(post_init)
+        .post_shutdown(post_shutdown)
+        .build()
+    )
 
     # Команды
     application.add_handler(CommandHandler("start", start))
@@ -912,25 +1143,44 @@ def main():
     application.add_handler(CommandHandler("set_cheese", set_cheese))
     application.add_handler(CommandHandler("order_cheese", order_cheese))
     application.add_handler(CommandHandler("users", users_list))
+    application.add_handler(CommandHandler("paysupport", paysupport))
+    application.add_handler(CommandHandler("app", app_command))
+    application.add_handler(CommandHandler("invite", invite))
+
+    # Оплата звёздами Telegram
+    application.add_handler(PreCheckoutQueryHandler(precheckout))
+    application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_stars_payment))
 
     # Кнопки
     application.add_handler(CallbackQueryHandler(button_callback))
 
-    # Текст (для адреса)
+    # Текст (город / адрес для творога)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    print(f"🔒 {BOT_NAME} запущен!")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    application.add_error_handler(error_handler)
+
+    if application.job_queue:
+        application.job_queue.run_repeating(sync_wg_peers, interval=EXPIRED_PEERS_CHECK_INTERVAL, first=60)
+    else:
+        logger.warning("JobQueue недоступен: установите python-telegram-bot[job-queue]")
+
+    if DEMO_MODE:
+        logger.warning("ДЕМО-РЕЖИМ: VPN-ключи не настоящие, оплата засчитывается без денег")
+    logger.info("🔒 %s запускается...", BOT_NAME)
+    try:
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
+    except InvalidToken:
+        sys.exit("❌ Telegram отклонил токен. Проверьте BOT_TOKEN в .env или перевыпустите его в @BotFather")
 
 def run_api_server():
     """Запуск API сервера для админ-панели"""
     from api import run_server
     import threading
-    thread = threading.Thread(target=run_server, args=(8080,), daemon=True)
+    port = int(os.environ.get("API_PORT", "8080"))
+    thread = threading.Thread(target=run_server, args=(port,), daemon=True)
     thread.start()
 
 if __name__ == '__main__':
-    import os
     # Запускаем API сервер если включено
     if os.environ.get("ENABLE_API", "false").lower() == "true":
         run_api_server()

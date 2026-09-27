@@ -1,24 +1,55 @@
 """
 Конфигурация Творог VPN Bot
-Читает настройки из переменных окружения
+Читает настройки из переменных окружения (файл .env рядом с bot.py)
 """
 import os
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+except ImportError:
+    pass
+
 # Название бота
 BOT_NAME = "Творог VPN"
-BOT_USERNAME = "tvorog_vpn_bot"
+BOT_USERNAME = os.environ.get("BOT_USERNAME", "tvorog_vpn_bot").lstrip("@")
 
-# Telegram Bot Token
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8782090577:AAEFp08ZPvh9QDDeESi6EsmljEs2Bh2Qqq8")
+# Telegram Bot Token (получить у @BotFather). Никогда не храните токен в коде!
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
 
-# ID администратора
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))
+# ID администратора (узнать свой ID: @userinfobot)
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "0") or 0)
 
 # WireGuard настройки
-WG_INTERFACE = "wg0"
-WG_PORT = 51820
-WG_DNS = "1.1.1.1, 8.8.8.8"
+WG_INTERFACE = os.environ.get("WG_INTERFACE", "wg0")
+WG_PORT = int(os.environ.get("WG_PORT", "51820"))
+WG_DNS = os.environ.get("WG_DNS", "1.1.1.1, 8.8.8.8")
 WG_SERVER_IP = os.environ.get("WG_SERVER_IP", "YOUR_SERVER_IP")
+# Публичный ключ сервера WireGuard. Если пусто — берётся из `wg show` или /etc/wireguard/server_public.key
+WG_SERVER_PUBLIC_KEY = os.environ.get("WG_SERVER_PUBLIC_KEY", "").strip()
+
+# Демо-режим: бот работает без VPN-сервера и без ЮKassa (для показа).
+# VPN-ключи генерируются, но не подключаются; оплата засчитывается без денег.
+DEMO_MODE = os.environ.get("DEMO_MODE", "false").lower() == "true"
+
+# Реферальная программа
+# Пригласившему — дней за каждого друга, который оформит платную подписку
+REFERRAL_BONUS_DAYS = int(os.environ.get("REFERRAL_BONUS_DAYS", "7"))
+# Другу — дополнительные дни к пробному периоду (3 + 4 = 7 дней)
+REFERRAL_FRIEND_BONUS_DAYS = int(os.environ.get("REFERRAL_FRIEND_BONUS_DAYS", "4"))
+
+# Мини-приложение внутри Telegram. WEBAPP_URL — публичный https-адрес, где открыт порт WEBAPP_PORT.
+# Пусто — приложение выключено.
+WEBAPP_URL = os.environ.get("WEBAPP_URL", "").strip().rstrip("/")
+WEBAPP_PORT = int(os.environ.get("WEBAPP_PORT", "8080"))
+
+# Бот поддержки (отдельный бот от @BotFather)
+SUPPORT_BOT_TOKEN = os.environ.get("SUPPORT_BOT_TOKEN", "").strip()
+# Username бота поддержки (или аккаунта поддержки) — на него ведут кнопки «Поддержка»
+SUPPORT_USERNAME = os.environ.get("SUPPORT_USERNAME", "tvorog_support").lstrip("@")
+SUPPORT_URL = f"https://t.me/{SUPPORT_USERNAME}"
+# Куда приходят обращения: ID админа (по умолчанию) или ID группы операторов
+SUPPORT_CHAT_ID = int(os.environ.get("SUPPORT_CHAT_ID", "0") or 0) or ADMIN_ID
 
 # Тарифы (в рублях)
 TARIFFS = {
@@ -31,34 +62,47 @@ TARIFFS = {
     "month": {
         "name": "1 месяц",
         "price": 299,
+        "stars": 199,
         "days": 30,
         "description": "299 ₽"
     },
     "quarter": {
         "name": "3 месяца",
         "price": 699,
+        "stars": 449,
         "days": 90,
         "description": "699 ₽"
     },
     "year": {
         "name": "1 год",
         "price": 1999,
+        "stars": 1299,
         "days": 365,
         "description": "1999 ₽"
     }
 }
 
 # ЮKassa настройки
-YOOKASSA_SHOP_ID = os.environ.get("YOOKASSA_SHOP_ID", "1412568")
-YOOKASSA_SECRET_KEY = os.environ.get("YOOKASSA_SECRET_KEY", "live_vpeOwoU9atdXO_CyOv0ZzW6weVD2_iJ7nbdbTp1e2LQ")
+YOOKASSA_SHOP_ID = os.environ.get("YOOKASSA_SHOP_ID", "").strip()
+YOOKASSA_SECRET_KEY = os.environ.get("YOOKASSA_SECRET_KEY", "").strip()
 PAYMENT_METHODS = ["bank_card", "sbp", "sberpay"]
+
+# Оплата звёздами Telegram (цены — в поле "stars" у тарифов). Ничего настраивать не нужно.
+STARS_ENABLED = os.environ.get("STARS_ENABLED", "true").lower() == "true"
+
+# Оплата криптовалютой через @CryptoBot (Crypto Pay API): @CryptoBot → Crypto Pay → Create App
+CRYPTO_PAY_TOKEN = os.environ.get("CRYPTO_PAY_TOKEN", "").strip()
+# true — тестовая сеть (@CryptoTestnetBot, тестовые монеты, без реальных денег)
+CRYPTO_PAY_TESTNET = os.environ.get("CRYPTO_PAY_TESTNET", "false").lower() == "true"
+# Какие монеты принимать (сумма считается из цены в рублях по курсу CryptoBot)
+CRYPTO_ASSETS = os.environ.get("CRYPTO_ASSETS", "USDT,TON")
 
 # Серверы
 SERVERS = {
     "main": {
         "name": "Основной",
         "ip": WG_SERVER_IP,
-        "port": 51820,
+        "port": WG_PORT,
         "country": "Россия"
     }
 }
@@ -67,8 +111,8 @@ SERVERS = {
 DATABASE_PATH = os.environ.get("DATABASE_PATH", "tvorog_vpn.db")
 
 # Лимиты
-MAX_DEVICES = 3
-TRIAL_DAYS = 3
+MAX_DEVICES = int(os.environ.get("MAX_DEVICES", "3"))
+TRIAL_DAYS = int(os.environ.get("TRIAL_DAYS", "3"))
 
 # Тексты сообщений
 WELCOME_TEXT = """
@@ -83,11 +127,11 @@ WELCOME_TEXT = """
 ⚡ Простое подключение за пару секунд
 👨‍💻 Поддержка 24/7
 
-✨ Нажмите «Подключиться», чтобы получить 3 дня бесплатно!
+✨ Нажмите «Попробовать 3 дня бесплатно» — и подключитесь за минуту!
 """
 
 INFO_TEXT = """
-<b>О сервисе</b>
+<b>ℹ️ О сервисе</b>
 
 Творог VPN использует современный протокол с открытым исходным кодом, который обеспечивает высокую скорость и стабильное соединение. Все наши серверы подключены к каналу до 10 Гбит/с, чтобы выдерживать нагрузку и не терять скорость в часы пик.
 
@@ -95,20 +139,20 @@ INFO_TEXT = """
 
 Доступ к VPN выдаётся через Telegram, поэтому сервис не зависит от App Store и других площадок, и его сложнее ограничить через удаление приложения.
 
-<b>Команды:</b>
-/start — Главное меню
-/buy — Купить подписку
-/status — Проверить статус
-/gift — Получить творог
-/help — Помощь
+<b>Команды</b>
+/start — главное меню
+/buy — тарифы и оплата
+/status — личный кабинет
+/gift — творог в подарок
+/help — поддержка
 """
 
 HELP_TEXT = """
-<b>Помощь</b>
+<b>💬 Поддержка</b>
 
-Если у вас возникли вопросы или проблемы, напишите в поддержку:
+Что-то не работает или есть вопрос? Напишите нам — отвечаем 24/7 и поможем подключиться за пару минут.
 
-<a href="https://t.me/tvorog_support">@tvorog_support</a>
+Поддержка: @{SUPPORT_USERNAME}
 """
 
 TARIFF_TEXT = """
@@ -134,7 +178,7 @@ DEVICE_SELECT_TEXT = """
 """
 
 INSTALL_IPHONE_TEXT = """
-<b>Установка на iPhone / iPad</b>
+<b>📲 Установка на iPhone / iPad</b>
 
 1. <b>Установка приложения</b>
 Скачайте Happ из App Store:
@@ -143,44 +187,44 @@ INSTALL_IPHONE_TEXT = """
 
 Запустите приложение, в окне разрешения VPN-конфигурации нажмите Allow и введите свой пароль.
 
-2. <b>Добавление подписки</b>
-Нажмите кнопку «Получить VPN-ключ» ниже — затем «Добавить в Happ», и подписка добавится автоматически.
+2. <b>Добавление ключа</b>
+Нажмите «Получить ключ» ниже — бот пришлёт файл и QR-код. Откройте файл в приложении или отсканируйте QR-код.
 
 3. <b>Подключение</b>
 Нажмите большую кнопку включения в центре. Выберите сервер в списке серверов.
 """
 
 INSTALL_ANDROID_TEXT = """
-<b>Установка на Android</b>
+<b>📲 Установка на Android</b>
 
 1. <b>Установка приложения</b>
 Скачайте Happ:
 • <a href="https://play.google.com/store/apps/details?id=com.happproxy">Google Play</a>
 • <a href="https://github.com/Happ-proxy/happ-android/releases/latest/download/Happ.apk">Скачать APK</a> (если Google Play не работает)
 
-2. <b>Добавление подписки</b>
-Нажмите «Получить VPN-ключ» ниже — затем «Добавить в Happ», и подписка добавится автоматически.
+2. <b>Добавление ключа</b>
+Нажмите «Получить ключ» ниже — бот пришлёт файл и QR-код. Откройте файл в приложении или отсканируйте QR-код.
 
 3. <b>Подключение</b>
 Откройте приложение и подключитесь к серверу.
 """
 
 INSTALL_WINDOWS_TEXT = """
-<b>Установка на Windows</b>
+<b>📲 Установка на Windows</b>
 
 1. <b>Установка приложения</b>
 Скачайте и установите Happ:
 • <a href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe">Скачать Happ для Windows</a>
 
-2. <b>Добавление подписки</b>
-Нажмите «Получить VPN-ключ» ниже — затем «Добавить в Happ», и подписка добавится автоматически.
+2. <b>Добавление ключа</b>
+Нажмите «Получить ключ» ниже — бот пришлёт файл и QR-код. Откройте файл в приложении или отсканируйте QR-код.
 
 3. <b>Подключение</b>
 Нажмите большую кнопку включения и выберите сервер.
 """
 
 INSTALL_MAC_TEXT = """
-<b>Установка на Mac / MacBook</b>
+<b>📲 Установка на Mac / MacBook</b>
 
 1. <b>Установка приложения</b>
 Скачайте Happ из App Store:
@@ -189,34 +233,38 @@ INSTALL_MAC_TEXT = """
 
 Запустите приложение, разрешите VPN-конфигурацию.
 
-2. <b>Добавление подписки</b>
-Нажмите «Получить VPN-ключ» ниже — затем «Добавить в Happ».
+2. <b>Добавление ключа</b>
+Нажмите «Получить ключ» ниже — бот пришлёт файл и QR-код. Откройте файл в приложении или отсканируйте QR-код.
 
 3. <b>Подключение</b>
 Нажмите кнопку включения и выберите сервер.
 """
 
 INSTALL_LINUX_TEXT = """
-<b>Установка на Linux</b>
+<b>📲 Установка на Linux</b>
 
 1. <b>Установка приложения</b>
 Скачайте Happ:
 • <a href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.AppImage">Скачать Happ для Linux</a>
 
-2. <b>Добавление подписки</b>
-Нажмите «Получить VPN-ключ» ниже — затем «Добавить в Happ».
+2. <b>Добавление ключа</b>
+Нажмите «Получить ключ» ниже — бот пришлёт файл и QR-код. Откройте файл в приложении или отсканируйте QR-код.
 
 3. <b>Подключение</b>
 Нажмите кнопку включения и выберите сервер.
 """
 
 CONFIG_INSTRUCTION_TEXT = """
-<b>Инструкция по установке</b>
+<b>📖 Как подключиться</b>
 
-1. Скачайте Happ для вашего устройства
-2. Нажмите «Получить VPN-ключ»
-3. Добавьте подписку в Happ
-4. Подключитесь к серверу
+1. Установите приложение — ссылки есть в разделе «Подключить устройство»
+2. Нажмите «Получить ключ» — бот пришлёт файл и QR-код
+3. Откройте файл в приложении или отсканируйте QR-код
+4. Включите VPN — готово!
 
-Готово!
+Не получается? Напишите в поддержку @{SUPPORT_USERNAME} — поможем.
 """
+
+# Подставляем username поддержки в тексты
+HELP_TEXT = HELP_TEXT.replace("{SUPPORT_USERNAME}", SUPPORT_USERNAME)
+CONFIG_INSTRUCTION_TEXT = CONFIG_INSTRUCTION_TEXT.replace("{SUPPORT_USERNAME}", SUPPORT_USERNAME)

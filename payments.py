@@ -1,13 +1,32 @@
 """
-Модуль оплаты через ЮKassa
+Модуль оплаты: ЮKassa (карты, СБП) и CryptoBot (криптовалюта).
+Оплата звёздами Telegram — в bot.py (встроена в Telegram).
 """
+import logging
 import uuid
 import httpx
 from datetime import datetime
-from config import TARIFFS, YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY, PAYMENT_METHODS
+from config import (
+    TARIFFS, YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY, DEMO_MODE,
+    CRYPTO_PAY_TOKEN, CRYPTO_PAY_TESTNET, CRYPTO_ASSETS, BOT_NAME
+)
+
+logger = logging.getLogger(__name__)
+
+YOOKASSA_TIMEOUT = 20
+CRYPTO_PAY_API = "https://testnet-pay.crypt.bot/api" if CRYPTO_PAY_TESTNET else "https://pay.crypt.bot/api"
 
 
-def create_payment_link(tariff_key: str, user_id: int) -> dict:
+def card_payments_enabled() -> bool:
+    """Оплата картой/СБП доступна: настроена ЮKassa или демо-режим"""
+    return DEMO_MODE or bool(YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY)
+
+
+def crypto_payments_enabled() -> bool:
+    return bool(CRYPTO_PAY_TOKEN)
+
+
+async def create_payment_link(tariff_key: str, user_id: int) -> dict:
     """
     Создать платёжную ссылку через ЮKassa
 
@@ -17,6 +36,18 @@ def create_payment_link(tariff_key: str, user_id: int) -> dict:
     tariff = TARIFFS[tariff_key]
 
     if tariff["price"] == 0:
+        return None
+
+    if DEMO_MODE:
+        return {
+            "payment_id": f"demo-{uuid.uuid4()}",
+            "confirmation_url": "https://t.me/tvorog_vpn_bot",
+            "amount": tariff["price"],
+            "tariff": tariff_key
+        }
+
+    if not YOOKASSA_SHOP_ID or not YOOKASSA_SECRET_KEY:
+        logger.error("ЮKassa не настроена: заполните YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY в .env")
         return None
 
     # Уникальный ID платежа
@@ -44,12 +75,13 @@ def create_payment_link(tariff_key: str, user_id: int) -> dict:
 
     try:
         # Отправляем запрос
-        response = httpx.post(
-            url,
-            json=payload,
-            auth=(YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY),
-            headers={"Idempotence-Key": payment_id}
-        )
+        async with httpx.AsyncClient(timeout=YOOKASSA_TIMEOUT) as client:
+            response = await client.post(
+                url,
+                json=payload,
+                auth=(YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY),
+                headers={"Idempotence-Key": payment_id}
+            )
 
         if response.status_code == 200:
             data = response.json()
@@ -60,28 +92,32 @@ def create_payment_link(tariff_key: str, user_id: int) -> dict:
                 "tariff": tariff_key
             }
         else:
-            print(f"Ошибка ЮKassa: {response.status_code} - {response.text}")
+            logger.error("Ошибка ЮKassa: %s - %s", response.status_code, response.text)
             return None
 
     except Exception as e:
-        print(f"Ошибка создания платежа: {e}")
+        logger.exception("Ошибка создания платежа: %s", e)
         return None
 
 
-def check_payment_status(payment_id: str) -> dict:
+async def check_payment_status(payment_id: str) -> dict:
     """
     Проверить статус платежа
 
     Returns:
         dict: {"status": str, "paid": bool}
     """
+    if DEMO_MODE and payment_id.startswith("demo-"):
+        return {"status": "succeeded", "paid": True, "amount": "0", "metadata": {}}
+
     url = f"https://api.yookassa.ru/v3/payments/{payment_id}"
 
     try:
-        response = httpx.get(
-            url,
-            auth=(YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY)
-        )
+        async with httpx.AsyncClient(timeout=YOOKASSA_TIMEOUT) as client:
+            response = await client.get(
+                url,
+                auth=(YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY)
+            )
 
         if response.status_code == 200:
             data = response.json()
@@ -92,10 +128,11 @@ def check_payment_status(payment_id: str) -> dict:
                 "metadata": data.get("metadata", {})
             }
         else:
+            logger.error("Ошибка проверки платежа ЮKassa: %s - %s", response.status_code, response.text)
             return {"status": "error", "paid": False}
 
     except Exception as e:
-        print(f"Ошибка проверки платежа: {e}")
+        logger.exception("Ошибка проверки платежа: %s", e)
         return {"status": "error", "paid": False}
 
 
@@ -145,3 +182,59 @@ def format_subscription_status(user) -> str:
         return f"✅ Активна ещё {days} дней (до {expires.strftime('%d.%m.%Y')})"
     else:
         return "❌ Подписка истекла"
+
+
+# ───────────────────────── CryptoBot (Crypto Pay API) ─────────────────────────
+
+async def _crypto_request(method: str, params: dict) -> dict:
+    async with httpx.AsyncClient(timeout=YOOKASSA_TIMEOUT) as client:
+        response = await client.post(
+            f"{CRYPTO_PAY_API}/{method}",
+            json=params,
+            headers={"Crypto-Pay-API-Token": CRYPTO_PAY_TOKEN}
+        )
+    data = response.json()
+    if not data.get("ok"):
+        raise RuntimeError(f"Crypto Pay {method}: {data.get('error')}")
+    return data["result"]
+
+
+async def create_crypto_invoice(tariff_key: str, user_id: int) -> dict:
+    """Счёт в CryptoBot. Сумма — цена тарифа в рублях, клиент платит USDT/TON по курсу."""
+    tariff = TARIFFS[tariff_key]
+    try:
+        result = await _crypto_request("createInvoice", {
+            "currency_type": "fiat",
+            "fiat": "RUB",
+            "amount": str(tariff["price"]),
+            "accepted_assets": CRYPTO_ASSETS,
+            "description": f"{BOT_NAME} — {tariff['name']}",
+            "payload": f"{user_id}:{tariff_key}",
+            "expires_in": 3600,
+        })
+        return {
+            "payment_id": str(result["invoice_id"]),
+            "confirmation_url": result.get("bot_invoice_url") or result.get("pay_url"),
+        }
+    except Exception as e:
+        logger.exception("Ошибка создания счёта CryptoBot: %s", e)
+        return None
+
+
+async def check_crypto_invoice(invoice_id: str) -> dict:
+    """Статус счёта CryptoBot в том же формате, что и check_payment_status"""
+    try:
+        result = await _crypto_request("getInvoices", {"invoice_ids": str(invoice_id)})
+        items = result.get("items", [])
+        if not items:
+            return {"status": "error", "paid": False}
+        invoice = items[0]
+        user_id = (invoice.get("payload") or "").split(":")[0]
+        return {
+            "status": invoice["status"],
+            "paid": invoice["status"] == "paid",
+            "metadata": {"user_id": user_id} if user_id else {},
+        }
+    except Exception as e:
+        logger.exception("Ошибка проверки счёта CryptoBot: %s", e)
+        return {"status": "error", "paid": False}

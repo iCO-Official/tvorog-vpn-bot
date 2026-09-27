@@ -2,19 +2,18 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+ENV PYTHONUNBUFFERED=1
+
 # Установка зависимостей
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     wireguard-tools \
     && rm -rf /var/lib/apt/lists/*
 
-# Копирование файлов
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Создание директорий
-RUN mkdir -p configs
+RUN mkdir -p configs data
 
-# Запуск
 CMD ["python", "bot.py"]

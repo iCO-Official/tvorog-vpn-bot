@@ -424,6 +424,7 @@
 
     <script>
         const API_BASE = window.location.origin;
+        const API_QUERY = window.location.search; // ?token=... если задан API_TOKEN
 
         function showSection(name) {
             document.querySelectorAll('.section').forEach(s => s.style.display = 'none');
@@ -434,7 +435,7 @@
 
         async function loadStats() {
             try {
-                const res = await fetch(API_BASE + '/api/stats');
+                const res = await fetch(API_BASE + '/api/stats' + API_QUERY);
                 const s = await res.json();
 
                 document.getElementById('total-users').textContent = s.total_users;
@@ -477,7 +478,7 @@
 
         async function loadUsers() {
             try {
-                const res = await fetch(API_BASE + '/api/users');
+                const res = await fetch(API_BASE + '/api/users' + API_QUERY);
                 const users = await res.json();
 
                 if (users.length === 0) {
@@ -502,7 +503,7 @@
 
         async function loadPayments() {
             try {
-                const res = await fetch(API_BASE + '/api/payments');
+                const res = await fetch(API_BASE + '/api/payments' + API_QUERY);
                 const payments = await res.json();
 
                 if (payments.length === 0) {

@@ -16,7 +16,7 @@ cp tvorog_vpn.db "$BACKUP_DIR/tvorog_vpn_$DATE.db"
 
 # Бэкап конфигурации
 echo "⚙️ Бэкап конфигурации..."
-cp config.py "$BACKUP_DIR/config_$DATE.py"
+cp .env "$BACKUP_DIR/env_$DATE" 2>/dev/null || true
 
 # Бэкап WireGuard конфига
 echo "🔑 Бэкап WireGuard..."
