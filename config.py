@@ -28,6 +28,10 @@ WG_SERVER_IP = os.environ.get("WG_SERVER_IP", "YOUR_SERVER_IP")
 # Публичный ключ сервера WireGuard. Если пусто — берётся из `wg show` или /etc/wireguard/server_public.key
 WG_SERVER_PUBLIC_KEY = os.environ.get("WG_SERVER_PUBLIC_KEY", "").strip()
 
+# Демо-режим: бот работает без VPN-сервера и без ЮKassa (для показа).
+# VPN-ключи генерируются, но не подключаются; оплата засчитывается без денег.
+DEMO_MODE = os.environ.get("DEMO_MODE", "false").lower() == "true"
+
 # Тарифы (в рублях)
 TARIFFS = {
     "trial": {

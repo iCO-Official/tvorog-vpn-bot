@@ -1,9 +1,10 @@
+import base64
 import subprocess
 import ipaddress
 import logging
 import os
 import shutil
-from config import WG_INTERFACE, WG_SERVER_IP, WG_PORT, WG_DNS, WG_SERVER_PUBLIC_KEY
+from config import WG_INTERFACE, WG_SERVER_IP, WG_PORT, WG_DNS, WG_SERVER_PUBLIC_KEY, DEMO_MODE
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +17,19 @@ class WireGuardError(Exception):
     """Ошибка работы с WireGuard"""
 
 
+def _demo_key() -> str:
+    return base64.b64encode(os.urandom(32)).decode()
+
+
 def _wg(*args, input_text=None) -> str:
     """Вызвать утилиту wg и вернуть stdout"""
+    if DEMO_MODE:
+        # Без VPN-сервера: ключи «похожие на настоящие», команды wg set/show — пропускаем
+        if args[0] in ("genkey", "pubkey"):
+            return _demo_key()
+        if args[:1] == ("show",) and args[-1:] == ("public-key",):
+            return _demo_key()
+        return ""
     if not shutil.which("wg"):
         raise WireGuardError("Утилита wg не найдена. Установите: apt install wireguard-tools")
     result = subprocess.run(["wg", *args], input=input_text, capture_output=True, text=True)

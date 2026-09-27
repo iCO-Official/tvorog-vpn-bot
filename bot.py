@@ -18,7 +18,7 @@ from telegram.ext import (
 )
 
 from config import (
-    BOT_TOKEN, TARIFFS, SERVERS, ADMIN_ID, BOT_NAME,
+    BOT_TOKEN, TARIFFS, SERVERS, ADMIN_ID, BOT_NAME, DEMO_MODE,
     WELCOME_TEXT, HELP_TEXT, TARIFF_TEXT, INFO_TEXT,
     CONFIG_INSTRUCTION_TEXT, DATABASE_PATH, TRIAL_DAYS,
     INSTALL_IPHONE_TEXT, INSTALL_ANDROID_TEXT, INSTALL_WINDOWS_TEXT, INSTALL_MAC_TEXT,
@@ -372,6 +372,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"• Система быстрых платежей\n\n"
                     f"📱 СБП или 💳 Карта · <b>{tariff['price']} ₽</b>"
                 )
+                if DEMO_MODE:
+                    payment_text += "\n\n<i>🧪 Демо-режим: деньги не списываются, просто нажмите «Проверить оплату».</i>"
 
                 # Кнопки оплаты
                 keyboard = [
@@ -990,6 +992,8 @@ def main():
     else:
         logger.warning("JobQueue недоступен: установите python-telegram-bot[job-queue]")
 
+    if DEMO_MODE:
+        logger.warning("ДЕМО-РЕЖИМ: VPN-ключи не настоящие, оплата засчитывается без денег")
     logger.info("🔒 %s запускается...", BOT_NAME)
     try:
         application.run_polling(allowed_updates=Update.ALL_TYPES)

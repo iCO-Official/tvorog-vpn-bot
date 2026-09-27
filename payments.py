@@ -5,7 +5,7 @@ import logging
 import uuid
 import httpx
 from datetime import datetime
-from config import TARIFFS, YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY, PAYMENT_METHODS
+from config import TARIFFS, YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY, PAYMENT_METHODS, DEMO_MODE
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,14 @@ async def create_payment_link(tariff_key: str, user_id: int) -> dict:
 
     if tariff["price"] == 0:
         return None
+
+    if DEMO_MODE:
+        return {
+            "payment_id": f"demo-{uuid.uuid4()}",
+            "confirmation_url": "https://t.me/tvorog_vpn_bot",
+            "amount": tariff["price"],
+            "tariff": tariff_key
+        }
 
     if not YOOKASSA_SHOP_ID or not YOOKASSA_SECRET_KEY:
         logger.error("ЮKassa не настроена: заполните YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY в .env")
@@ -85,6 +93,9 @@ async def check_payment_status(payment_id: str) -> dict:
     Returns:
         dict: {"status": str, "paid": bool}
     """
+    if DEMO_MODE and payment_id.startswith("demo-"):
+        return {"status": "succeeded", "paid": True, "amount": "0", "metadata": {}}
+
     url = f"https://api.yookassa.ru/v3/payments/{payment_id}"
 
     try:
